@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark工作室 - 内部投票系统</title>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
+    <style>
+        /* 调整为更具科技感/工作室风格的配色 */
+        :root { 
+            --spark-blue: #0984e3; 
+            --spark-dark: #2d3436; 
+            --spark-bg: #f1f2f6; 
+            --spark-gold: #fdcb6e;
+        }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--spark-bg); margin: 0; padding: 20px; color: var(--spark-dark); }
+        .container { max-width: 1100px; margin: 0 auto; }
+        
+        /* 标题样式 */
+        .header-box { text-align: center; margin-bottom: 40px; border-bottom: 3px solid var(--spark-blue); padding-bottom: 10px; }
+        h1 { margin: 0; color: var(--spark-dark); letter-spacing: 2px; }
+        .sub-title { color: var(--spark-blue); font-weight: bold; font-size: 1.1rem; }
+
+        /* 管理员面板 */
+        #admin-panel { 
+            display: none; background: #fff; padding: 25px; border-radius: 8px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 30px; border-top: 5px solid var(--spark-dark);
+        }
+        .admin-item { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; }
+        .admin-item input { flex: 1; padding: 12px; border: 1px solid #dfe6e9; border-radius: 4px; }
+        
+        button { cursor: pointer; border: none; border-radius: 4px; padding: 10px 20px; transition: 0.3s; font-weight: bold; }
+        .btn-save { background: var(--spark-dark); color: white; flex: 2; }
+        .btn-add { background: var(--spark-blue); color: white; flex: 1; }
+        .btn-remove { background: #ff7675; color: white; padding: 5px 15px; }
+
+        /* 投票网格 */
+        .vote-grid { 
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+            gap: 30px; 
+        }
+        .card { 
+            background: white; border-radius: 8px; overflow: hidden; 
+            box-shadow: 0 6px 12px rgba(0,0,0,0.05); transition: 0.4s; 
+            position: relative;
+        }
+        .card:hover { transform: translateY(-8px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
+
+        /* 图片预览区 */
+        .card-img-wrapper { width: 100%; height: 220px; overflow: hidden; cursor: zoom-in; position: relative; }
+        .card-img-wrapper img { width: 100%; height: 100%; object-fit: cover; }
+        .card-img-wrapper::after { 
+            content: "🔍 点击查看大图"; position: absolute; top: 10px; left: 10px; 
+            background: rgba(0,0,0,0.6); color: white; font-size: 11px; padding: 4px 10px; border-radius: 20px;
+        }
+
+        .card-body { padding: 20px; text-align: center; }
+        .card-name { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; display: block; }
+        
+        /* 进度条 */
+        .progress-box { height: 8px; background: #eee; border-radius: 10px; margin: 15px 0; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--spark-blue); width: 0%; transition: 1.5s cubic-bezier(0.1, 0.7, 1.0, 0.1); }
+        .stats { font-size: 0.9rem; color: #636e72; margin-bottom: 20px; font-family: monospace; }
+
+        /* 独立投票按钮 */
+        .vote-action-btn { 
+            width: 100%; background: #fff; color: var(--spark-blue); 
+            border: 2px solid var(--spark-blue); padding: 12px; border-radius: 4px; 
+            font-size: 1rem; text-transform: uppercase;
+        }
+        .vote-action-btn:hover { background: var(--spark-blue); color: #fff; }
+
+        /* 大图预览模态框 */
+        #modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); z-index: 9999; justify-content: center; align-items: center;
+            cursor: zoom-out;
+        }
+        #modal img { max-width: 95%; max-height: 95%; border: 2px solid white; }
+
+        .footer { text-align: center; margin-top: 60px; color: #b2bec3; font-size: 12px; cursor: pointer; padding-bottom: 40px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-box">
+        <h1 id="mainTitle">SPARK STUDIO</h1>
+        <div class="sub-title">内部决策投票系统</div>
+    </div>
+
+    <div id="admin-panel">
+        <h3 style="margin-top:0">🛠 工作室管理后台</h3>
+        <div id="admin-list"></div>
+        <div class="btn-group">
+            <button class="btn-add" onclick="addNewRow()">+ 新增投票项</button>
+            <button class="btn-save" onclick="saveAll()">保存并更新线上</button>
+        </div>
+    </div>
+
+    <div class="vote-grid" id="voteGrid"></div>
+
+    <div class="footer" onclick="toggleAdmin()">
+        Spark Studio Internal Only | <span id="adminBtn">管理入口</span>
+    </div>
+</div>
+
+<div id="modal" onclick="closeModal()">
+    <img id="modalImg" src="">
+</div>
+
+<script>
+    // ==========================================
+    // 1. 配置区
+    // ==========================================
+    const firebaseConfig = {
+        databaseURL: "https://playa-dc7ae-default-rtdb.firebaseio.com/" 
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let currentData = {}; 
+    let isAdmin = false;
+
+    // 实时监听
+    db.ref('sparkVote').on('value', (snapshot) => {
+        const data = snapshot.val() || { title: "SPARK STUDIO", items: [] };
+        currentData = data;
+        renderUserView(data.items || []);
+        if (isAdmin) renderAdminView(data.items || []);
+    });
+
+    // 渲染用户视图
+    function renderUserView(items) {
+        const grid = document.getElementById('voteGrid');
+        grid.innerHTML = '';
+        const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
+
+        items.forEach((item, index) => {
+            const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
+            
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="card-img-wrapper" onclick="openModal('${item.url}')">
+                    <img src="${item.url || 'https://via.placeholder.com/400x300'}">
+                </div>
+                <div class="card-body">
+                    <span class="card-name">${item.name || '未命名项目'}</span>
+                    <div class="progress-box"><div class="progress-fill" style="width: ${percent}%"></div></div>
+                    <div class="stats">CURRENT: ${item.votes || 0} VOTES (${percent}%)</div>
+                    <button class="vote-action-btn" onclick="castVote(${index})">确认投递</button>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    // --- 大图预览 ---
+    function openModal(url) {
+        const modal = document.getElementById('modal');
+        document.getElementById('modalImg').src = url;
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+        document.getElementById('modal').style.display = 'none';
+        document.body.style.overflow = 'auto';
+    }
+
+    // --- 投票功能 ---
+    function castVote(index) {
+        if (localStorage.getItem('spark_voted')) {
+            alert("Spark成员，每项任务您仅能投递一次。");
+            return;
+        }
+        db.ref(`sparkVote/items/${index}/votes`).transaction((v) => (v || 0) + 1);
+        localStorage.setItem('spark_voted', 'true');
+        alert("投票已录入工作室云端。");
+    }
+
+    // --- 管理功能 ---
+    function toggleAdmin() {
+        if (!isAdmin) {
+            if (prompt("Spark Studio 身份验证:") === "123456") { 
+                isAdmin = true;
+                document.getElementById('admin-panel').style.display = 'block';
+                document.getElementById('adminBtn').innerText = "退出管理";
+                renderAdminView(currentData.items || []);
+            }
+        } else {
+            isAdmin = false;
+            document.getElementById('admin-panel').style.display = 'none';
+            document.getElementById('adminBtn').innerText = "管理入口";
+        }
+    }
+
+    function renderAdminView(items) {
+        const list = document.getElementById('admin-list');
+        list.innerHTML = '';
+        items.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'admin-item';
+            div.innerHTML = `
+                <input type="text" class="edit-name" placeholder="项目/方案名称" value="${item.name || ''}">
+                <input type="text" class="edit-url" placeholder="图片直链 URL" value="${item.url || ''}">
+                <button class="btn-remove" onclick="removeRow(${index})">删除</button>
+            `;
+            list.appendChild(div);
+        });
+    }
+
+    function addNewRow() {
+        const list = document.getElementById('admin-list');
+        if (list.children.length >= 10) return alert("最多录入10项");
+        const div = document.createElement('div');
+        div.className = 'admin-item';
+        div.innerHTML = `
+            <input type="text" class="edit-name" placeholder="新项目名称">
+            <input type="text" class="edit-url" placeholder="图片直链 URL">
+            <button class="btn-remove" onclick="this.parentElement.remove()">删除</button>
+        `;
+        list.appendChild(div);
+    }
+
+    function removeRow(index) {
+        if(confirm("确定永久删除此项？")) {
+            let items = [...currentData.items];
+            items.splice(index, 1);
+            db.ref('sparkVote/items').set(items);
+        }
+    }
+
+    function saveAll() {
+        const names = document.querySelectorAll('.edit-name');
+        const urls = document.querySelectorAll('.edit-url');
+        let newItems = [];
+        names.forEach((input, i) => {
+            const n = input.value.trim();
+            const u = urls[i].value.trim();
+            if (n && u) {
+                const old = currentData.items ? currentData.items.find(it => it.url === u) : null;
+                newItems.push({ name: n, url: u, votes: old ? old.votes : 0 });
+            }
+        });
+        db.ref('sparkVote').set({ items: newItems })
+          .then(() => alert("Spark云端已成功更新。"));
+    }
+</script>
+</body>
+</html>
