@@ -11,6 +11,7 @@
         :root { 
             --spark-bg: #f1f2f6; 
             --spark-dark: #2d3436; 
+            --spark-blue: #0984e3;
         }
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--spark-bg); margin: 0; padding: 20px; color: var(--spark-dark); }
         .container { max-width: 1100px; margin: 0 auto; }
@@ -25,6 +26,14 @@
             display: none; background: #fff; padding: 25px; border-radius: 8px; 
             box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 30px; border-top: 5px solid var(--spark-dark);
         }
+        
+        /* 规则设置栏 (新) */
+        .config-bar {
+            background: #e1f5fe; padding: 15px; border-radius: 6px; margin-bottom: 20px; 
+            display: flex; align-items: center; gap: 10px; border: 1px solid #b3e5fc; color: #0277bd;
+        }
+        .config-bar input { padding: 5px; border-radius: 4px; border: 1px solid #81d4fa; text-align: center; font-weight: bold; color: #0277bd; }
+
         .admin-item { 
             display: flex; gap: 15px; margin-bottom: 15px; align-items: stretch; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #eee; flex-wrap: wrap; 
         }
@@ -45,8 +54,6 @@
         .btn-save { background: var(--spark-dark); color: white; width: 100%; margin-top: 10px; padding: 15px; font-size: 16px; }
         .btn-add { background: #0984e3; color: white; width: 100%; margin-top: 10px; }
         .btn-remove { background: #ff7675; color: white; padding: 0 15px; display: flex; align-items: center; justify-content: center; }
-        
-        /* 危险操作区 */
         .danger-zone { margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc; display: flex; gap: 10px; }
         .btn-danger { background: #fff; border: 1px solid #fab1a0; color: #d63031; flex: 1; font-size: 12px; }
         .btn-danger:hover { background: #d63031; color: white; }
@@ -62,10 +69,10 @@
             border-radius: 0 10px 10px 0;
             display: flex; justify-content: space-between; align-items: center;
             background: rgba(255,255,255,0.8);
-            border-left: 8px solid #ccc; /* 默认色，会被JS覆盖 */
+            border-left: 8px solid #ccc; 
         }
+        .group-info { display: flex; gap: 10px; align-items: center; }
         .group-status { font-size: 12px; background: rgba(0,0,0,0.1); padding: 4px 10px; border-radius: 20px; color: inherit; font-weight: normal; }
-        .group-status.voted { background: rgba(0,0,0,0.8); color: white; }
 
         .vote-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
         .card { 
@@ -91,7 +98,10 @@
             font-size: 1rem; font-weight: bold; cursor: pointer;
         }
         .vote-action-btn:hover { background: #333; color: #fff; }
-        .vote-action-btn.disabled { background: #dfe6e9; color: #b2bec3; border-color: #dfe6e9; cursor: not-allowed; }
+        /* 禁用状态：用于额度用完 */
+        .vote-action-btn.disabled { background: #dfe6e9; color: #b2bec3; border-color: #dfe6e9; cursor: not-allowed; pointer-events: none; }
+        /* 已选状态：高亮显示 */
+        .vote-action-btn.selected { background: #00b894 !important; color: white !important; border-color: #00b894 !important; cursor: default; pointer-events: none; }
 
         #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; justify-content: center; align-items: center; cursor: zoom-out; }
         #modal img { max-width: 95%; max-height: 95%; border: 2px solid white; object-fit: contain; }
@@ -110,14 +120,21 @@
 
     <div id="admin-panel">
         <h3 style="margin-top:0">🛠 工作室管理后台</h3>
-        <p style="font-size: 12px; color: #999;">规则：每组一人一票。上传支持拖拽。</p>
+        
+        <div class="config-bar">
+            <span>⚙️ <b>投票规则：</b>每个分组下，每人允许投</span>
+            <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 50px;">
+            <span>票</span>
+            <span style="font-size:12px; opacity:0.7; margin-left:10px;">(设为1即为单选，>1为多选)</span>
+        </div>
+
         <div id="admin-list"></div>
         <div class="btn-group">
             <button class="btn-add" onclick="addNewRow()">+ 新增投票项</button>
             <button class="btn-save" onclick="saveAll()">💾 保存并更新线上</button>
         </div>
         <div class="danger-zone">
-            <button class="btn-danger" onclick="resetAllVotes()">⚠️ 清空票数 (开启新一轮)</button>
+            <button class="btn-danger" onclick="resetAllVotes()">⚠️ 清空所有票数 (开启新一轮)</button>
             <button class="btn-danger" onclick="deleteAllItems()">🗑️ 删除所有选项</button>
         </div>
     </div>
@@ -145,57 +162,65 @@
 
     let currentData = {}; 
     let isAdmin = false;
+    let globalMaxVotes = 1; // 默认单选
     
-    // 预设配色盘 (Spark风格)
-    const colorPalette = [
-        '#0984e3', // 蓝
-        '#00b894', // 绿
-        '#6c5ce7', // 紫
-        '#e17055', // 橘红
-        '#fdcb6e', // 黄
-        '#e84393', // 粉
-        '#2d3436', // 黑灰
-        '#00cec9'  // 青
-    ];
-    // 缓存颜色，防止刷新时颜色乱跳
+    // 预设配色盘
+    const colorPalette = ['#0984e3', '#00b894', '#6c5ce7', '#e17055', '#fdcb6e', '#e84393', '#2d3436', '#00cec9'];
     let groupColorMap = {};
 
     // 实时监听
     db.ref('sparkVote').on('value', (snapshot) => {
-        const data = snapshot.val() || { title: "SPARK STUDIO", items: [], round: 0 };
+        const data = snapshot.val() || { items: [], round: 0, maxVotes: 1 };
         currentData = data;
+        
+        // 更新全局规则
+        globalMaxVotes = data.maxVotes || 1; 
 
-        // 核心：检查投票轮次是否更新
+        // 检查轮次
         checkRoundVersion(data.round || 0);
 
         renderUserView(data.items || []);
-        if (isAdmin) renderAdminView(data.items || []);
+        if (isAdmin) {
+            renderAdminView(data.items || []);
+            document.getElementById('maxVoteInput').value = globalMaxVotes;
+        }
     });
 
     // ==========================================
-    // 2. 核心功能：轮次控制 (自动重置用户状态)
+    // 2. 核心功能：轮次控制与本地存储
     // ==========================================
     function checkRoundVersion(serverRound) {
         const localRound = parseInt(localStorage.getItem('spark_vote_round') || '-1');
-        // 如果服务器轮次比本地大，说明管理员重置了投票
         if (serverRound > localRound) {
             localStorage.setItem('spark_vote_round', serverRound);
-            localStorage.removeItem('spark_voted_groups'); // 清空本地记录
-            console.log("新一轮投票开启，本地记录已重置");
-            if (localRound !== -1) alert("🔔 管理员已开启新一轮投票，您的权限已重置。");
+            localStorage.removeItem('spark_voted_log'); // 清空具体的投票记录
+            if (localRound !== -1) alert("🔔 新一轮投票已开启！");
         }
     }
 
+    // 获取某组已投的数量
+    function getVotedCount(groupName) {
+        const log = JSON.parse(localStorage.getItem('spark_voted_log') || '{}');
+        const groupLog = log[groupName] || [];
+        return groupLog.length;
+    }
+
+    // 检查某项是否已投
+    function hasVotedItem(groupName, index) {
+        const log = JSON.parse(localStorage.getItem('spark_voted_log') || '{}');
+        const groupLog = log[groupName] || [];
+        return groupLog.includes(index);
+    }
+
     // ==========================================
-    // 3. 用户视图渲染 (含随机颜色)
+    // 3. 用户视图渲染 (逻辑大升级)
     // ==========================================
     function renderUserView(items) {
         const container = document.getElementById('voteContainer');
         container.innerHTML = '';
         const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
-        const votedGroups = JSON.parse(localStorage.getItem('spark_voted_groups') || '{}');
 
-        // 数据分组
+        // 分组整理
         const groupedItems = {};
         items.forEach((item, index) => {
             const groupName = item.group || '默认分组';
@@ -203,49 +228,66 @@
             groupedItems[groupName].push({ ...item, originalIndex: index });
         });
 
-        // 遍历渲染
+        // 遍历分组
         Object.keys(groupedItems).forEach((groupName, gIndex) => {
-            const hasVotedThisGroup = votedGroups[groupName] === true;
-            
-            // --- 颜色分配逻辑 ---
-            if (!groupColorMap[groupName]) {
-                // 根据组名哈希或者直接轮循分配颜色
-                groupColorMap[groupName] = colorPalette[gIndex % colorPalette.length];
-            }
+            // 获取当前用户的投票状态
+            const votedCount = getVotedCount(groupName);
+            const votesLeft = globalMaxVotes - votedCount;
+            const isFull = votesLeft <= 0;
+
+            // 颜色分配
+            if (!groupColorMap[groupName]) groupColorMap[groupName] = colorPalette[gIndex % colorPalette.length];
             const themeColor = groupColorMap[groupName];
 
-            // 创建区域
+            // 构建UI
             const section = document.createElement('div');
             section.className = 'group-section';
             
-            // 标题
+            // 标题栏：显示剩余票数
             const showTitle = Object.keys(groupedItems).length > 1 || groupName !== '默认分组';
             if (showTitle) {
-                const statusBadge = hasVotedThisGroup 
-                    ? `<span class="group-status voted">✅ 本组已投</span>` 
-                    : `<span class="group-status">⏳ 本组未投</span>`;
-                
-                // 应用颜色到边框和背景(淡化)
+                let statusText = "";
+                if (isFull) {
+                    statusText = `<span class="group-status voted">✅ 本组已完成</span>`;
+                } else {
+                    statusText = `<span class="group-status">剩余票数: ${votesLeft}</span>`;
+                }
+
                 section.innerHTML = `
                     <h2 class="group-title" style="border-left-color: ${themeColor}; background: linear-gradient(90deg, ${themeColor}15, transparent);">
                         <span style="color: ${themeColor}">${groupName}</span> 
-                        ${statusBadge}
+                        <div class="group-info">${statusText}</div>
                     </h2>`;
             }
 
-            // 网格
             const grid = document.createElement('div');
             grid.className = 'vote-grid';
 
             groupedItems[groupName].forEach(item => {
                 const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
-                const btnClass = hasVotedThisGroup ? "vote-action-btn disabled" : "vote-action-btn";
-                const btnText = hasVotedThisGroup ? "本组已完成" : "🗳️ 投他一票";
-                const btnClick = hasVotedThisGroup ? "" : `onclick="castVote(${item.originalIndex}, '${groupName}')"`;
+                const isSelected = hasVotedItem(groupName, item.originalIndex);
+
+                // 按钮逻辑：
+                // 1. 如果已选 -> 显示“已选”，绿色
+                // 2. 如果没选但没票了 -> 禁用，显示“票数不足”
+                // 3. 如果没选且有票 -> 正常，显示“投一票”
                 
-                // 按钮和进度条跟随主题色
-                const btnStyle = hasVotedThisGroup ? "" : `style="border-color:${themeColor}; color:${themeColor}"`;
-                const btnHoverStyle = `onmouseover="this.style.background='${themeColor}';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='${themeColor}'"`;
+                let btnClass = "vote-action-btn";
+                let btnText = "🗳️ 投他一票";
+                let btnClick = `onclick="castVote(${item.originalIndex}, '${groupName}')"`;
+                let btnStyle = `style="border-color:${themeColor}; color:${themeColor}"`;
+                
+                if (isSelected) {
+                    btnClass += " selected";
+                    btnText = "✅ 已选";
+                    btnClick = "";
+                    btnStyle = ""; // 使用CSS中的 !important 样式
+                } else if (isFull) {
+                    btnClass += " disabled";
+                    btnText = "⛔ 组内票数已满";
+                    btnClick = "";
+                    btnStyle = "";
+                }
 
                 const card = document.createElement('div');
                 card.className = 'card';
@@ -259,9 +301,7 @@
                             <div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div>
                             <div class="stats">${item.votes || 0} 票 (${percent}%)</div>
                         </div>
-                        <button class="${btnClass}" ${btnClick} ${hasVotedThisGroup ? '' : btnStyle} ${hasVotedThisGroup ? '' : btnHoverStyle}>
-                            ${btnText}
-                        </button>
+                        <button class="${btnClass}" ${btnClick} ${btnStyle}>${btnText}</button>
                     </div>
                 `;
                 grid.appendChild(card);
@@ -273,28 +313,43 @@
         if (items.length === 0) container.innerHTML = '<div style="text-align:center; padding:50px; color:#999">暂无投票项目</div>';
     }
 
-    // --- 投票与预览 ---
+    // --- 投票逻辑 (支持多选计数) ---
+    function castVote(index, groupName) {
+        // 1. 读取记录
+        let log = JSON.parse(localStorage.getItem('spark_voted_log') || '{}');
+        if (!log[groupName]) log[groupName] = [];
+
+        // 2. 验证票数限制
+        if (log[groupName].length >= globalMaxVotes) {
+            return alert(`【${groupName}】的票数已用尽！\n规则：本组最多投 ${globalMaxVotes} 票。`);
+        }
+        
+        // 3. 验证是否重复投同一项
+        if (log[groupName].includes(index)) {
+            return alert("您已经投过这一项了！");
+        }
+
+        // 4. 执行投票
+        db.ref(`sparkVote/items/${index}/votes`).transaction((v) => (v || 0) + 1);
+
+        // 5. 更新本地记录
+        log[groupName].push(index);
+        localStorage.setItem('spark_voted_log', JSON.stringify(log));
+
+        // 6. 成功反馈
+        alert(`🎉 投票成功！\n本组剩余票数：${globalMaxVotes - log[groupName].length}`);
+    }
+
+    // --- 预览 ---
     function openModal(index) {
         document.getElementById('modalImg').src = document.getElementById(`img-${index}`).src;
         document.getElementById('modal').style.display = 'flex';
         document.body.style.overflow = 'hidden';
     }
-    function closeModal() {
-        document.getElementById('modal').style.display = 'none';
-        document.body.style.overflow = 'auto';
-    }
-    function castVote(index, groupName) {
-        let votedGroups = JSON.parse(localStorage.getItem('spark_voted_groups') || '{}');
-        if (votedGroups[groupName]) return alert(`【${groupName}】您已经投过票了！`);
-        
-        db.ref(`sparkVote/items/${index}/votes`).transaction((v) => (v || 0) + 1);
-        votedGroups[groupName] = true;
-        localStorage.setItem('spark_voted_groups', JSON.stringify(votedGroups));
-        alert(`🎉 投票成功！`);
-    }
+    function closeModal() { document.getElementById('modal').style.display = 'none'; document.body.style.overflow = 'auto'; }
 
     // ==========================================
-    // 4. 管理后台逻辑 (新增清空功能)
+    // 4. 管理逻辑
     // ==========================================
     function toggleAdmin() {
         if (!isAdmin) {
@@ -303,6 +358,7 @@
                 document.getElementById('admin-panel').style.display = 'block';
                 document.getElementById('adminBtn').innerText = "退出管理";
                 renderAdminView(currentData.items || []);
+                document.getElementById('maxVoteInput').value = globalMaxVotes; // 同步输入框
             }
         } else {
             isAdmin = false;
@@ -322,35 +378,23 @@
         list.appendChild(createAdminRow({}, null));
     }
 
-    // --- 危险操作：清空票数 ---
     function resetAllVotes() {
         const confirmCode = Math.floor(1000 + Math.random() * 9000);
-        const userCode = prompt(`⚠️ 高能预警：\n这将清空所有票数并强制所有用户开启新一轮投票！\n\n确认请输入验证码: ${confirmCode}`);
-        
+        const userCode = prompt(`⚠️ 将清空所有票数并开始新一轮！\n确认码: ${confirmCode}`);
         if (userCode == confirmCode) {
             const newItems = (currentData.items || []).map(item => ({ ...item, votes: 0 }));
-            // 更新 items 同时增加 round 轮次，触发客户端自动重置 localStorage
             db.ref('sparkVote').update({
                 items: newItems,
                 round: (currentData.round || 0) + 1
-            }).then(() => alert("✅ 已重置票数，新一轮投票开始！"));
+            }).then(() => alert("✅ 重置成功"));
         }
     }
+    function deleteAllItems() { if (confirm("确定清空列表？")) db.ref('sparkVote/items').set([]).then(() => alert("已清空")); }
 
-    // --- 危险操作：删除所有 ---
-    function deleteAllItems() {
-        if (confirm("🧨 确定要删除所有投票项目吗？此操作不可恢复！")) {
-            db.ref('sparkVote/items').set([])
-              .then(() => alert("已清空所有项目"));
-        }
-    }
-
-    // 常规管理逻辑
     function createAdminRow(item, index) {
         const div = document.createElement('div');
         div.className = 'admin-item';
-        const dropZoneContent = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入图片 / 粘贴</span>`;
-
+        const dropZoneContent = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入 / 粘贴</span>`;
         div.innerHTML = `
             <div class="input-group" style="flex:0.5; min-width:100px;">
                 <label>分组名称</label>
@@ -375,7 +419,7 @@
         return div;
     }
 
-    // 图片处理简写
+    // 图片处理
     function handleDrop(e, zone) { e.preventDefault(); zone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if(f) processFile(f, zone); }
     function handlePaste(e, zone) { 
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -403,7 +447,7 @@
     }
 
     function removeRow(btn, index) {
-        if (index === null || index === undefined) btn.parentElement.remove();
+        if (index === null) btn.parentElement.remove();
         else if(confirm("删除此项？")) {
             let items = [...currentData.items];
             items.splice(index, 1);
@@ -413,6 +457,9 @@
 
     function saveAll() {
         const rows = document.querySelectorAll('#admin-list .admin-item');
+        // 读取新的投票规则
+        const newMaxVotes = parseInt(document.getElementById('maxVoteInput').value) || 1;
+        
         let newItems = [];
         rows.forEach(row => {
             const group = row.querySelector('.edit-group').value.trim() || '默认分组';
@@ -424,8 +471,12 @@
             }
         });
         if (newItems.length === 0 && rows.length > 0) return alert("请填写完整");
-        // 保存时保留当前的 round
-        db.ref('sparkVote').update({ items: newItems }).then(() => alert("✅ 保存成功"));
+
+        // 保存items和maxVotes
+        db.ref('sparkVote').update({ 
+            items: newItems,
+            maxVotes: newMaxVotes 
+        }).then(() => alert("✅ 保存成功！规则已更新为: 每个分组限投 " + newMaxVotes + " 票"));
     }
 </script>
 </body>
