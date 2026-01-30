@@ -9,18 +9,16 @@
     <style>
         /* --- 基础样式 --- */
         :root { 
-            --spark-blue: #0984e3; 
-            --spark-dark: #2d3436; 
             --spark-bg: #f1f2f6; 
-            --spark-gold: #fdcb6e;
+            --spark-dark: #2d3436; 
         }
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--spark-bg); margin: 0; padding: 20px; color: var(--spark-dark); }
         .container { max-width: 1100px; margin: 0 auto; }
         
         /* 标题样式 */
-        .header-box { text-align: center; margin-bottom: 40px; border-bottom: 3px solid var(--spark-blue); padding-bottom: 10px; }
+        .header-box { text-align: center; margin-bottom: 40px; border-bottom: 3px solid #ccc; padding-bottom: 10px; }
         h1 { margin: 0; color: var(--spark-dark); letter-spacing: 2px; }
-        .sub-title { color: var(--spark-blue); font-weight: bold; font-size: 1.1rem; }
+        .sub-title { color: #666; font-weight: bold; font-size: 1.1rem; }
 
         /* 管理员面板 */
         #admin-panel { 
@@ -28,95 +26,77 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 30px; border-top: 5px solid var(--spark-dark);
         }
         .admin-item { 
-            display: flex; gap: 15px; margin-bottom: 15px; align-items: stretch; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #eee;
+            display: flex; gap: 15px; margin-bottom: 15px; align-items: stretch; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #eee; flex-wrap: wrap; 
         }
-        
-        /* 输入框样式 */
-        .input-group { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+        .input-group { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 5px; min-width: 150px; }
+        .input-group label { font-size:12px; color:#aaa; font-weight:bold; }
         .admin-item input[type="text"] { padding: 10px; border: 1px solid #dfe6e9; border-radius: 4px; width: 90%; }
         
-        /* === 新增：拖拽上传区域样式 === */
+        /* 拖拽上传区域 */
         .drop-zone {
-            flex: 2;
-            border: 2px dashed #b2bec3;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #636e72;
-            font-size: 13px;
-            cursor: pointer;
-            transition: 0.3s;
-            background: #fff;
-            position: relative;
-            overflow: hidden;
-            min-height: 80px;
-            text-align: center;
-            padding: 5px;
+            flex: 2; border: 2px dashed #b2bec3; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+            color: #636e72; font-size: 13px; cursor: pointer; transition: 0.3s; background: #fff; min-height: 80px; min-width: 200px;
         }
-        .drop-zone:hover, .drop-zone.drag-over {
-            border-color: var(--spark-blue);
-            background: #e1f5fe;
-            color: var(--spark-blue);
-        }
-        .drop-zone img.preview-thumb {
-            height: 100%;
-            max-height: 70px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-        .drop-zone span { pointer-events: none; } /* 防止文字干扰拖拽 */
+        .drop-zone:hover, .drop-zone.drag-over { border-color: #0984e3; background: #e1f5fe; color: #0984e3; }
+        .drop-zone img.preview-thumb { height: 100%; max-height: 70px; border-radius: 4px; }
 
-        /* 按钮样式 */
+        /* 按钮体系 */
         button { cursor: pointer; border: none; border-radius: 4px; padding: 10px 20px; transition: 0.3s; font-weight: bold; }
         .btn-save { background: var(--spark-dark); color: white; width: 100%; margin-top: 10px; padding: 15px; font-size: 16px; }
-        .btn-add { background: var(--spark-blue); color: white; width: 100%; margin-top: 10px; }
-        .btn-remove { background: #ff7675; color: white; padding: 0 15px; display: flex; align-items: center; }
+        .btn-add { background: #0984e3; color: white; width: 100%; margin-top: 10px; }
+        .btn-remove { background: #ff7675; color: white; padding: 0 15px; display: flex; align-items: center; justify-content: center; }
+        
+        /* 危险操作区 */
+        .danger-zone { margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc; display: flex; gap: 10px; }
+        .btn-danger { background: #fff; border: 1px solid #fab1a0; color: #d63031; flex: 1; font-size: 12px; }
+        .btn-danger:hover { background: #d63031; color: white; }
 
-        /* 投票网格 */
-        .vote-grid { 
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-            gap: 30px; 
+        /* === 投票显示区域 === */
+        #voteContainer { display: flex; flex-direction: column; gap: 40px; }
+        .group-section { animation: fadeIn 0.5s ease; }
+        
+        /* 动态颜色的标题 */
+        .group-title { 
+            font-size: 1.5rem; 
+            padding: 12px 20px; margin-bottom: 20px; color: var(--spark-dark);
+            border-radius: 0 10px 10px 0;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255,255,255,0.8);
+            border-left: 8px solid #ccc; /* 默认色，会被JS覆盖 */
         }
+        .group-status { font-size: 12px; background: rgba(0,0,0,0.1); padding: 4px 10px; border-radius: 20px; color: inherit; font-weight: normal; }
+        .group-status.voted { background: rgba(0,0,0,0.8); color: white; }
+
+        .vote-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
         .card { 
             background: white; border-radius: 8px; overflow: hidden; 
             box-shadow: 0 6px 12px rgba(0,0,0,0.05); transition: 0.4s; 
-            position: relative;
+            position: relative; display: flex; flex-direction: column;
         }
         .card:hover { transform: translateY(-8px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
 
-        /* 图片预览区 */
-        .card-img-wrapper { width: 100%; height: 220px; overflow: hidden; cursor: zoom-in; position: relative; background: #eee; }
+        .card-img-wrapper { width: 100%; height: 200px; overflow: hidden; cursor: zoom-in; position: relative; background: #eee; }
         .card-img-wrapper img { width: 100%; height: 100%; object-fit: cover; }
-        .card-img-wrapper::after { 
-            content: "🔍 点击查看大图"; position: absolute; top: 10px; left: 10px; 
-            background: rgba(0,0,0,0.6); color: white; font-size: 11px; padding: 4px 10px; border-radius: 20px;
-        }
-
-        .card-body { padding: 20px; text-align: center; }
-        .card-name { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; display: block; }
         
-        /* 进度条 */
+        .card-body { padding: 20px; text-align: center; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+        .card-name { font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; display: block; }
+        
         .progress-box { height: 8px; background: #eee; border-radius: 10px; margin: 15px 0; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--spark-blue); width: 0%; transition: 1.5s cubic-bezier(0.1, 0.7, 1.0, 0.1); }
-        .stats { font-size: 0.9rem; color: #636e72; margin-bottom: 20px; font-family: monospace; }
+        .progress-fill { height: 100%; background: #ccc; width: 0%; transition: 1.5s cubic-bezier(0.1, 0.7, 1.0, 0.1); }
+        .stats { font-size: 0.85rem; color: #636e72; margin-bottom: 15px; font-family: monospace; }
 
-        /* 独立投票按钮 */
         .vote-action-btn { 
-            width: 100%; background: #fff; color: var(--spark-blue); 
-            border: 2px solid var(--spark-blue); padding: 12px; border-radius: 4px; 
-            font-size: 1rem; text-transform: uppercase;
+            width: 100%; background: #fff; color: #333; 
+            border: 2px solid #333; padding: 10px; border-radius: 4px; 
+            font-size: 1rem; font-weight: bold; cursor: pointer;
         }
-        .vote-action-btn:hover { background: var(--spark-blue); color: #fff; }
+        .vote-action-btn:hover { background: #333; color: #fff; }
+        .vote-action-btn.disabled { background: #dfe6e9; color: #b2bec3; border-color: #dfe6e9; cursor: not-allowed; }
 
-        /* 大图预览模态框 */
-        #modal {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.95); z-index: 9999; justify-content: center; align-items: center;
-            cursor: zoom-out;
-        }
+        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; justify-content: center; align-items: center; cursor: zoom-out; }
         #modal img { max-width: 95%; max-height: 95%; border: 2px solid white; object-fit: contain; }
-
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .footer { text-align: center; margin-top: 60px; color: #b2bec3; font-size: 12px; cursor: pointer; padding-bottom: 40px; }
     </style>
 </head>
@@ -130,15 +110,19 @@
 
     <div id="admin-panel">
         <h3 style="margin-top:0">🛠 工作室管理后台</h3>
-        <p style="font-size: 12px; color: #999;">支持：直接粘贴截图(Ctrl+V)、拖拽图片文件、或点击上传。图片将自动压缩。</p>
+        <p style="font-size: 12px; color: #999;">规则：每组一人一票。上传支持拖拽。</p>
         <div id="admin-list"></div>
         <div class="btn-group">
             <button class="btn-add" onclick="addNewRow()">+ 新增投票项</button>
-            <button class="btn-save" onclick="saveAll()">保存并更新线上</button>
+            <button class="btn-save" onclick="saveAll()">💾 保存并更新线上</button>
+        </div>
+        <div class="danger-zone">
+            <button class="btn-danger" onclick="resetAllVotes()">⚠️ 清空票数 (开启新一轮)</button>
+            <button class="btn-danger" onclick="deleteAllItems()">🗑️ 删除所有选项</button>
         </div>
     </div>
 
-    <div class="vote-grid" id="voteGrid"></div>
+    <div id="voteContainer"></div>
 
     <div class="footer" onclick="toggleAdmin()">
         Spark Studio Internal Only | <span id="adminBtn">管理入口</span>
@@ -161,68 +145,157 @@
 
     let currentData = {}; 
     let isAdmin = false;
+    
+    // 预设配色盘 (Spark风格)
+    const colorPalette = [
+        '#0984e3', // 蓝
+        '#00b894', // 绿
+        '#6c5ce7', // 紫
+        '#e17055', // 橘红
+        '#fdcb6e', // 黄
+        '#e84393', // 粉
+        '#2d3436', // 黑灰
+        '#00cec9'  // 青
+    ];
+    // 缓存颜色，防止刷新时颜色乱跳
+    let groupColorMap = {};
 
     // 实时监听
     db.ref('sparkVote').on('value', (snapshot) => {
-        const data = snapshot.val() || { title: "SPARK STUDIO", items: [] };
+        const data = snapshot.val() || { title: "SPARK STUDIO", items: [], round: 0 };
         currentData = data;
+
+        // 核心：检查投票轮次是否更新
+        checkRoundVersion(data.round || 0);
+
         renderUserView(data.items || []);
         if (isAdmin) renderAdminView(data.items || []);
     });
 
-    // 渲染用户视图
-    function renderUserView(items) {
-        const grid = document.getElementById('voteGrid');
-        grid.innerHTML = '';
-        const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
-
-        items.forEach((item, index) => {
-            const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
-            
-            const card = document.createElement('div');
-            card.className = 'card';
-            card.innerHTML = `
-                <div class="card-img-wrapper" onclick="openModal('${index}')">
-                    <img id="img-${index}" src="${item.url || 'https://via.placeholder.com/400x300?text=No+Image'}">
-                </div>
-                <div class="card-body">
-                    <span class="card-name">${item.name || '未命名项目'}</span>
-                    <div class="progress-box"><div class="progress-fill" style="width: ${percent}%"></div></div>
-                    <div class="stats">CURRENT: ${item.votes || 0} VOTES (${percent}%)</div>
-                    <button class="vote-action-btn" onclick="castVote(${index})">确认投递</button>
-                </div>
-            `;
-            grid.appendChild(card);
-        });
+    // ==========================================
+    // 2. 核心功能：轮次控制 (自动重置用户状态)
+    // ==========================================
+    function checkRoundVersion(serverRound) {
+        const localRound = parseInt(localStorage.getItem('spark_vote_round') || '-1');
+        // 如果服务器轮次比本地大，说明管理员重置了投票
+        if (serverRound > localRound) {
+            localStorage.setItem('spark_vote_round', serverRound);
+            localStorage.removeItem('spark_voted_groups'); // 清空本地记录
+            console.log("新一轮投票开启，本地记录已重置");
+            if (localRound !== -1) alert("🔔 管理员已开启新一轮投票，您的权限已重置。");
+        }
     }
 
-    // --- 大图预览 ---
+    // ==========================================
+    // 3. 用户视图渲染 (含随机颜色)
+    // ==========================================
+    function renderUserView(items) {
+        const container = document.getElementById('voteContainer');
+        container.innerHTML = '';
+        const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
+        const votedGroups = JSON.parse(localStorage.getItem('spark_voted_groups') || '{}');
+
+        // 数据分组
+        const groupedItems = {};
+        items.forEach((item, index) => {
+            const groupName = item.group || '默认分组';
+            if (!groupedItems[groupName]) groupedItems[groupName] = [];
+            groupedItems[groupName].push({ ...item, originalIndex: index });
+        });
+
+        // 遍历渲染
+        Object.keys(groupedItems).forEach((groupName, gIndex) => {
+            const hasVotedThisGroup = votedGroups[groupName] === true;
+            
+            // --- 颜色分配逻辑 ---
+            if (!groupColorMap[groupName]) {
+                // 根据组名哈希或者直接轮循分配颜色
+                groupColorMap[groupName] = colorPalette[gIndex % colorPalette.length];
+            }
+            const themeColor = groupColorMap[groupName];
+
+            // 创建区域
+            const section = document.createElement('div');
+            section.className = 'group-section';
+            
+            // 标题
+            const showTitle = Object.keys(groupedItems).length > 1 || groupName !== '默认分组';
+            if (showTitle) {
+                const statusBadge = hasVotedThisGroup 
+                    ? `<span class="group-status voted">✅ 本组已投</span>` 
+                    : `<span class="group-status">⏳ 本组未投</span>`;
+                
+                // 应用颜色到边框和背景(淡化)
+                section.innerHTML = `
+                    <h2 class="group-title" style="border-left-color: ${themeColor}; background: linear-gradient(90deg, ${themeColor}15, transparent);">
+                        <span style="color: ${themeColor}">${groupName}</span> 
+                        ${statusBadge}
+                    </h2>`;
+            }
+
+            // 网格
+            const grid = document.createElement('div');
+            grid.className = 'vote-grid';
+
+            groupedItems[groupName].forEach(item => {
+                const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
+                const btnClass = hasVotedThisGroup ? "vote-action-btn disabled" : "vote-action-btn";
+                const btnText = hasVotedThisGroup ? "本组已完成" : "🗳️ 投他一票";
+                const btnClick = hasVotedThisGroup ? "" : `onclick="castVote(${item.originalIndex}, '${groupName}')"`;
+                
+                // 按钮和进度条跟随主题色
+                const btnStyle = hasVotedThisGroup ? "" : `style="border-color:${themeColor}; color:${themeColor}"`;
+                const btnHoverStyle = `onmouseover="this.style.background='${themeColor}';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='${themeColor}'"`;
+
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-img-wrapper" onclick="openModal('${item.originalIndex}')">
+                        <img id="img-${item.originalIndex}" src="${item.url || 'https://via.placeholder.com/400x300?text=No+Image'}">
+                    </div>
+                    <div class="card-body">
+                        <div>
+                            <span class="card-name">${item.name || '未命名项目'}</span>
+                            <div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div>
+                            <div class="stats">${item.votes || 0} 票 (${percent}%)</div>
+                        </div>
+                        <button class="${btnClass}" ${btnClick} ${hasVotedThisGroup ? '' : btnStyle} ${hasVotedThisGroup ? '' : btnHoverStyle}>
+                            ${btnText}
+                        </button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            section.appendChild(grid);
+            container.appendChild(section);
+        });
+
+        if (items.length === 0) container.innerHTML = '<div style="text-align:center; padding:50px; color:#999">暂无投票项目</div>';
+    }
+
+    // --- 投票与预览 ---
     function openModal(index) {
-        // 直接从 DOM 获取 src，防止数据延迟
-        const src = document.getElementById(`img-${index}`).src;
-        const modal = document.getElementById('modal');
-        document.getElementById('modalImg').src = src;
-        modal.style.display = 'flex';
+        document.getElementById('modalImg').src = document.getElementById(`img-${index}`).src;
+        document.getElementById('modal').style.display = 'flex';
         document.body.style.overflow = 'hidden';
     }
-
     function closeModal() {
         document.getElementById('modal').style.display = 'none';
         document.body.style.overflow = 'auto';
     }
-
-    // --- 投票功能 ---
-    function castVote(index) {
-        if (localStorage.getItem('spark_voted')) {
-            alert("Spark成员，每项任务您仅能投递一次。");
-            return;
-        }
+    function castVote(index, groupName) {
+        let votedGroups = JSON.parse(localStorage.getItem('spark_voted_groups') || '{}');
+        if (votedGroups[groupName]) return alert(`【${groupName}】您已经投过票了！`);
+        
         db.ref(`sparkVote/items/${index}/votes`).transaction((v) => (v || 0) + 1);
-        localStorage.setItem('spark_voted', 'true');
-        alert("投票已录入工作室云端。");
+        votedGroups[groupName] = true;
+        localStorage.setItem('spark_voted_groups', JSON.stringify(votedGroups));
+        alert(`🎉 投票成功！`);
     }
 
-    // --- 管理功能 ---
+    // ==========================================
+    // 4. 管理后台逻辑 (新增清空功能)
+    // ==========================================
     function toggleAdmin() {
         if (!isAdmin) {
             if (prompt("Spark Studio 身份验证:") === "123456") { 
@@ -238,173 +311,121 @@
         }
     }
 
-    // --- 核心：渲染带拖拽功能的管理列表 ---
     function renderAdminView(items) {
         const list = document.getElementById('admin-list');
         list.innerHTML = '';
-        items.forEach((item, index) => {
-            list.appendChild(createAdminRow(item.name, item.url, index));
-        });
+        items.forEach((item, index) => list.appendChild(createAdminRow(item, index)));
     }
-
     function addNewRow() {
         const list = document.getElementById('admin-list');
-        if (list.children.length >= 10) return alert("为保证性能，建议最多10项");
-        list.appendChild(createAdminRow('', '', null));
+        if (list.children.length >= 100) return alert("已达到系统最大限制");
+        list.appendChild(createAdminRow({}, null));
     }
 
-    // 创建管理行的 HTML 结构
-    function createAdminRow(name, url, index) {
+    // --- 危险操作：清空票数 ---
+    function resetAllVotes() {
+        const confirmCode = Math.floor(1000 + Math.random() * 9000);
+        const userCode = prompt(`⚠️ 高能预警：\n这将清空所有票数并强制所有用户开启新一轮投票！\n\n确认请输入验证码: ${confirmCode}`);
+        
+        if (userCode == confirmCode) {
+            const newItems = (currentData.items || []).map(item => ({ ...item, votes: 0 }));
+            // 更新 items 同时增加 round 轮次，触发客户端自动重置 localStorage
+            db.ref('sparkVote').update({
+                items: newItems,
+                round: (currentData.round || 0) + 1
+            }).then(() => alert("✅ 已重置票数，新一轮投票开始！"));
+        }
+    }
+
+    // --- 危险操作：删除所有 ---
+    function deleteAllItems() {
+        if (confirm("🧨 确定要删除所有投票项目吗？此操作不可恢复！")) {
+            db.ref('sparkVote/items').set([])
+              .then(() => alert("已清空所有项目"));
+        }
+    }
+
+    // 常规管理逻辑
+    function createAdminRow(item, index) {
         const div = document.createElement('div');
         div.className = 'admin-item';
-        
-        // 如果有url，显示缩略图
-        const dropZoneContent = url 
-            ? `<img src="${url}" class="preview-thumb">` 
-            : `<span>📷 拖入图片 / 粘贴 / 点击</span>`;
+        const dropZoneContent = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入图片 / 粘贴</span>`;
 
         div.innerHTML = `
-            <div class="input-group">
-                <label style="font-size:12px; color:#aaa; font-weight:bold;">方案名称</label>
-                <input type="text" class="edit-name" placeholder="请输入名称" value="${name || ''}">
+            <div class="input-group" style="flex:0.5; min-width:100px;">
+                <label>分组名称</label>
+                <input type="text" class="edit-group" placeholder="如: UI组" value="${item.group || ''}">
             </div>
-            
+            <div class="input-group">
+                <label>项目名称</label>
+                <input type="text" class="edit-name" placeholder="名称" value="${item.name || ''}">
+            </div>
             <div class="drop-zone" 
                  onclick="this.querySelector('input[type=file]').click()"
-                 ondragover="handleDragOver(event)" 
-                 ondragleave="handleDragLeave(event)" 
+                 ondragover="event.preventDefault();this.classList.add('drag-over')" 
+                 ondragleave="this.classList.remove('drag-over')" 
                  ondrop="handleDrop(event, this)"
                  onpaste="handlePaste(event, this)">
-                 
-                ${dropZoneContent}
-                
+                 ${dropZoneContent}
                 <input type="file" hidden accept="image/*" onchange="handleFileSelect(event, this.parentElement)">
-                <input type="hidden" class="edit-url" value="${url || ''}">
+                <input type="hidden" class="edit-url" value="${item.url || ''}">
             </div>
-
             <button class="btn-remove" onclick="removeRow(this, ${index})">❌</button>
         `;
         return div;
     }
 
-    // --- 拖拽与图片处理逻辑 ---
-
-    function handleDragOver(e) {
-        e.preventDefault();
-        e.currentTarget.classList.add('drag-over');
-    }
-
-    function handleDragLeave(e) {
-        e.currentTarget.classList.remove('drag-over');
-    }
-
-    function handleDrop(e, zone) {
-        e.preventDefault();
-        zone.classList.remove('drag-over');
-        const file = e.dataTransfer.files[0];
-        if (file && file.type.startsWith('image/')) {
-            processFile(file, zone);
-        }
-    }
-
-    function handlePaste(e, zone) {
-        // 阻止默认粘贴（避免粘贴文字）
+    // 图片处理简写
+    function handleDrop(e, zone) { e.preventDefault(); zone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if(f) processFile(f, zone); }
+    function handlePaste(e, zone) { 
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-        for (let item of items) {
-            if (item.type.indexOf("image") !== -1) {
-                e.preventDefault(); // 只有是图片时才阻止，允许粘贴纯文本（尽管我们主要想要图片）
-                const file = item.getAsFile();
-                processFile(file, zone);
-                return;
-            }
-        }
+        for (let i of items) if (i.type.indexOf("image") !== -1) { e.preventDefault(); processFile(i.getAsFile(), zone); return; }
     }
-
-    function handleFileSelect(e, zone) {
-        const file = e.target.files[0];
-        if (file) processFile(file, zone);
-    }
-
-    // 核心：读取 + 压缩图片
+    function handleFileSelect(e, zone) { const f = e.target.files[0]; if(f) processFile(f, zone); }
     function processFile(file, zone) {
-        zone.innerHTML = '<span>处理中...</span>';
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.src = e.target.result;
+        zone.innerHTML = '<span>⏳...</span>';
+        const r = new FileReader();
+        r.onload = (e) => {
+            const img = new Image(); img.src = e.target.result;
             img.onload = () => {
-                // 创建 Canvas 进行压缩
-                const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 800; // 限制最大宽度
-                const scaleSize = MAX_WIDTH / img.width;
-                
-                // 如果图片本身很小，就不放大了
-                const finalWidth = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
-                const finalHeight = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
-
-                canvas.width = finalWidth;
-                canvas.height = finalHeight;
-                
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                
-                // 压缩为 JPEG, 质量 0.7
-                const base64 = canvas.toDataURL('image/jpeg', 0.7);
-                
-                // 更新 UI
-                zone.innerHTML = `<img src="${base64}" class="preview-thumb">`;
-                // 重新插入 file input 以便下次还能点，并插入 hidden value
+                const c = document.createElement('canvas');
+                const s = 800 / img.width;
+                c.width = img.width > 800 ? 800 : img.width;
+                c.height = img.width > 800 ? img.height * s : img.height;
+                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                const b64 = c.toDataURL('image/jpeg', 0.7);
+                zone.innerHTML = `<img src="${b64}" class="preview-thumb">`;
                 zone.insertAdjacentHTML('beforeend', `<input type="file" hidden accept="image/*" onchange="handleFileSelect(event, this.parentElement)">`);
-                zone.insertAdjacentHTML('beforeend', `<input type="hidden" class="edit-url" value="${base64}">`);
+                zone.insertAdjacentHTML('beforeend', `<input type="hidden" class="edit-url" value="${b64}">`);
             };
         };
-        reader.readAsDataURL(file);
+        r.readAsDataURL(file);
     }
 
-    // --- 数据保存与删除 ---
-
     function removeRow(btn, index) {
-        // 如果是新加的行（index为null），直接删DOM
-        if (index === null || index === undefined) {
-            btn.parentElement.remove();
-        } else {
-            if(confirm("确定永久删除此项？")) {
-                let items = [...currentData.items];
-                items.splice(index, 1);
-                db.ref('sparkVote/items').set(items);
-            }
+        if (index === null || index === undefined) btn.parentElement.remove();
+        else if(confirm("删除此项？")) {
+            let items = [...currentData.items];
+            items.splice(index, 1);
+            db.ref('sparkVote/items').set(items);
         }
     }
 
     function saveAll() {
         const rows = document.querySelectorAll('#admin-list .admin-item');
         let newItems = [];
-        
         rows.forEach(row => {
+            const group = row.querySelector('.edit-group').value.trim() || '默认分组';
             const name = row.querySelector('.edit-name').value.trim();
-            // 注意：现在 url 存储在 hidden input 中
-            const urlInput = row.querySelector('.edit-url');
-            const url = urlInput ? urlInput.value : '';
-
+            const url = row.querySelector('.edit-url').value;
             if (name && url) {
-                // 尝试保留旧票数：通过名字匹配（不够完美但够用），或者直接保留0
-                // 更好的逻辑：如果是编辑模式，我们其实是覆盖了整个数组
-                // 这里简化逻辑：如果是完全新的，票数为0；如果只是改了名字没改图，保留；
-                // 实际上 firebase set 会覆盖，所以我们需要尽可能找回之前的票数
-                
-                // 简单的查找逻辑：如果在旧数据里能找到相同的图，就保留票数
                 const oldItem = currentData.items ? currentData.items.find(it => it.url === url) : null;
-                const oldVotes = oldItem ? oldItem.votes : 0;
-                
-                newItems.push({ name: name, url: url, votes: oldVotes });
+                newItems.push({ name, url, group, votes: oldItem ? oldItem.votes : 0 });
             }
         });
-
-        if (newItems.length === 0) return alert("请至少填写一项完整数据");
-
-        db.ref('sparkVote/items').set(newItems)
-          .then(() => alert("✨ Spark云端已成功更新！"))
-          .catch(err => alert("更新失败: " + err.message));
+        if (newItems.length === 0 && rows.length > 0) return alert("请填写完整");
+        // 保存时保留当前的 round
+        db.ref('sparkVote').update({ items: newItems }).then(() => alert("✅ 保存成功"));
     }
 </script>
 </body>
