@@ -339,7 +339,7 @@
         items.forEach(item => { if(item.group) groups.add(item.group); });
         
         // 增加一些默认建议（可选）
-        if(groups.size === 0) { groups.add("UI组"); groups.add("开发组"); groups.add("策划组"); }
+        if(groups.size === 0) { groups.add("");  }
 
         const datalist = document.getElementById('group-suggestions');
         datalist.innerHTML = '';
