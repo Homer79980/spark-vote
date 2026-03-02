@@ -25,7 +25,6 @@
         }
         .card:hover { transform: translateY(-5px); box-shadow: 0 12px 20px rgba(0,0,0,0.1); }
 
-        /* 缩略图模式优化：完整显示，不裁切 */
         .card-img-wrapper { 
             width: 100%; height: 160px; overflow: hidden; cursor: zoom-in; position: relative; 
             background: #f8f9fa; padding: 12px; box-sizing: border-box;
@@ -75,25 +74,33 @@
 
         /* === 管理面板 & 数据看板 === */
         #admin-panel { display: none; background: #fff; padding: 25px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
-        
-        .stats-dashboard { 
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; 
-            background: #f1f2f6; padding: 15px; border-radius: 8px;
-        }
+        .stats-dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; background: #f1f2f6; padding: 15px; border-radius: 8px; }
         .stat-card { background: white; padding: 15px; border-radius: 6px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .stat-num { font-size: 24px; font-weight: bold; color: var(--spark-blue); display: block; margin-bottom: 5px; }
         .stat-label { font-size: 12px; color: #999; }
-
         .config-bar { background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: #0277bd; font-size: 14px; }
         .admin-item { display: flex; gap: 10px; margin-bottom: 10px; align-items: stretch; background: #fafafa; padding: 8px; border: 1px solid #eee; }
-        
         .edit-group { cursor: pointer; }
-        
         .drop-zone { flex: 2; border: 2px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999; cursor: pointer; min-height: 60px; }
         .drop-zone img.preview-thumb { height: 50px; }
         
-        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; justify-content: center; align-items: center; cursor: zoom-out; }
-        #modal img { max-width: 95%; max-height: 95%; border: 2px solid white; object-fit: contain; }
+        /* === 弹窗 (画廊模式) 升级样式 === */
+        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 9999; justify-content: center; align-items: center; }
+        .modal-close { position: absolute; top: 20px; right: 30px; color: white; font-size: 36px; cursor: pointer; z-index: 10001; opacity: 0.7; transition: 0.2s; }
+        .modal-close:hover { opacity: 1; transform: scale(1.1); }
+        
+        .modal-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.1); color: white; border: none; font-size: 30px; padding: 15px 20px; cursor: pointer; border-radius: 8px; transition: 0.3s; z-index: 10000; user-select: none; }
+        .modal-nav:hover { background: rgba(255,255,255,0.3); }
+        .modal-nav.prev { left: 20px; }
+        .modal-nav.next { right: 20px; }
+
+        .modal-content-wrapper { display: flex; flex-direction: column; align-items: center; max-width: 80%; max-height: 90vh; }
+        #modal img { max-width: 100%; max-height: 70vh; border: 3px solid #fff; object-fit: contain; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        
+        .modal-footer { margin-top: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px; background: rgba(0,0,0,0.5); padding: 15px 30px; border-radius: 12px; }
+        #modalItemName { color: white; font-size: 1.4rem; font-weight: bold; letter-spacing: 1px; }
+        #modalVoteBtn { padding: 10px 30px; font-size: 1.1rem; border-radius: 30px; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; min-width: 150px; }
+        #modalVoteBtn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .footer { text-align: center; margin-top: 50px; color: #ccc; font-size: 12px; cursor: pointer; }
@@ -123,9 +130,7 @@
             <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;">
             <span>票</span>
         </div>
-
         <datalist id="group-suggestions"></datalist>
-
         <div id="admin-list"></div>
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
             <button onclick="addNewRow()" style="background:#0984e3; color:white; flex:1; padding:10px;">+ 新增</button>
@@ -139,11 +144,23 @@
     </div>
 
     <div id="voteContainer"></div>
-
     <div class="footer" onclick="toggleAdmin()">Spark Studio Internal | 管理入口</div>
 </div>
 
-<div id="modal" onclick="closeModal()"><img id="modalImg" src=""></div>
+<div id="modal" onclick="closeModal(event)">
+    <span class="modal-close" onclick="closeModal(event)">✕</span>
+    <button class="modal-nav prev" onclick="prevImage(event)">&#10094;</button>
+    
+    <div class="modal-content-wrapper" onclick="event.stopPropagation()">
+        <img id="modalImg" src="">
+        <div class="modal-footer">
+            <span id="modalItemName">项目名称</span>
+            <button id="modalVoteBtn" onclick="modalToggleVote(event)">👍 投一票</button>
+        </div>
+    </div>
+    
+    <button class="modal-nav next" onclick="nextImage(event)">&#10095;</button>
+</div>
 
 <script>
     const firebaseConfig = { databaseURL: "https://playa-dc7ae-default-rtdb.firebaseio.com/" };
@@ -153,6 +170,7 @@
     let currentData = { items: [], headcount: 0 }; 
     let isAdmin = false;
     let globalMaxVotes = 1;
+    let currentModalIndex = 0; // 新增：用于记录当前弹窗展示的图片索引
     const colorPalette = ['#0984e3', '#00b894', '#6c5ce7', '#e17055', '#fdcb6e', '#e84393', '#2d3436', '#00cec9'];
     let groupColorMap = {};
 
@@ -164,6 +182,11 @@
         checkRoundVersion(data.round || 0);
         renderUserView(data.items || []);
         
+        // 如果弹窗开着，同步刷新弹窗里的按钮状态（防止别人投票影响当前状态）
+        if (document.getElementById('modal').style.display === 'flex') {
+            updateModalUI();
+        }
+        
         if (isAdmin) {
             renderAdminView(data.items || []);
             updateDashboard(data);
@@ -172,7 +195,6 @@
         }
     });
 
-    // --- 核心逻辑 ---
     function checkRoundVersion(serverRound) {
         const localRound = parseInt(localStorage.getItem('spark_vote_round') || '-1');
         if (serverRound > localRound) {
@@ -214,11 +236,7 @@
                 const statusHtml = isFull 
                     ? `<span class="group-status voted">✅ 已完成</span>` 
                     : `<span class="group-status">剩余 ${votesLeft} 票</span>`;
-                section.innerHTML = `
-                    <h2 class="group-title" style="border-left-color: ${themeColor}">
-                        <span style="color: ${themeColor}">${groupName}</span> 
-                        ${statusHtml}
-                    </h2>`;
+                section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${groupName}</span> ${statusHtml}</h2>`;
             }
 
             const grid = document.createElement('div');
@@ -233,20 +251,15 @@
                 let clickAction = `onclick="toggleVote(${item.originalIndex}, '${groupName}')"`;
 
                 if (isSelected) {
-                    btnClass += " selected";
-                    btnText = "✅ 已选 (撤销)";
-                    btnStyle = "";
+                    btnClass += " selected"; btnText = "✅ 已选 (撤销)"; btnStyle = "";
                 } else if (isFull) {
-                    btnClass += " disabled";
-                    btnText = "⛔ 票数已满";
-                    clickAction = "";
-                    btnStyle = "";
+                    btnClass += " disabled"; btnText = "⛔ 票数已满"; clickAction = ""; btnStyle = "";
                 }
 
                 const card = document.createElement('div');
                 card.className = 'card';
                 card.innerHTML = `
-                    <div class="card-img-wrapper" onclick="openModal('${item.originalIndex}')">
+                    <div class="card-img-wrapper" onclick="openModal(${item.originalIndex})">
                         <img id="img-${item.originalIndex}" src="${item.url || 'https://via.placeholder.com/400x300?text=No+Image'}">
                     </div>
                     <div class="card-body">
@@ -266,7 +279,7 @@
         if (items.length === 0) container.innerHTML = '<div style="text-align:center; padding:50px; color:#999">暂无项目</div>';
     }
 
-    // --- 投票逻辑 ---
+    // --- 投票核心逻辑 ---
     function toggleVote(index, groupName) {
         let log = getLocalLog();
         if (!log[groupName]) log[groupName] = [];
@@ -303,18 +316,101 @@
         setTimeout(() => box.classList.remove('show'), 1000);
     }
     
+    // === 弹窗画廊模式相关逻辑 ===
     function openModal(index) { 
-        document.getElementById('modalImg').src = document.getElementById(`img-${index}`).src; 
+        currentModalIndex = parseInt(index);
+        updateModalUI();
         document.getElementById('modal').style.display = 'flex'; 
         document.body.style.overflow = 'hidden'; 
     }
-    
-    function closeModal() { 
+
+    // 更新弹窗内的图片、文字和按钮状态
+    function updateModalUI() {
+        if (!currentData.items || currentData.items.length === 0) return;
+        const item = currentData.items[currentModalIndex];
+        
+        document.getElementById('modalImg').src = item.url || 'https://via.placeholder.com/800x600?text=No+Image';
+        document.getElementById('modalItemName').innerText = item.name || '未命名';
+
+        // 刷新弹窗内的投票按钮状态
+        const groupName = item.group || '默认分组';
+        const log = getLocalLog();
+        const groupLog = log[groupName] || [];
+        const isSelected = groupLog.includes(currentModalIndex);
+        const votesLeft = globalMaxVotes - groupLog.length;
+        
+        const btn = document.getElementById('modalVoteBtn');
+        const themeColor = groupColorMap[groupName] || "#0984e3";
+
+        if (isSelected) {
+            btn.innerText = "✅ 已选 (点击撤销)";
+            btn.style.background = "#e1f5fe";
+            btn.style.color = "#0984e3";
+        } else if (votesLeft <= 0) {
+            btn.innerText = "⛔ 本组票数已满";
+            btn.style.background = "#555";
+            btn.style.color = "#ccc";
+        } else {
+            btn.innerText = `👍 投一票 (${groupName})`;
+            btn.style.background = themeColor;
+            btn.style.color = "white";
+        }
+    }
+
+    function closeModal(e) { 
+        // 只有点击背景或关闭按钮才关闭弹窗，点击图片本身不关闭
+        if (e && e.target.id !== 'modal' && !e.target.classList.contains('modal-close')) return;
         document.getElementById('modal').style.display = 'none'; 
         document.body.style.overflow = 'auto'; 
     }
 
-    // --- 后台功能 ---
+    function prevImage(e) {
+        if(e) e.stopPropagation();
+        if (currentData.items && currentData.items.length > 0) {
+            currentModalIndex = (currentModalIndex - 1 + currentData.items.length) % currentData.items.length;
+            updateModalUI();
+        }
+    }
+
+    function nextImage(e) {
+        if(e) e.stopPropagation();
+        if (currentData.items && currentData.items.length > 0) {
+            currentModalIndex = (currentModalIndex + 1) % currentData.items.length;
+            updateModalUI();
+        }
+    }
+
+    // 弹窗内部的投票按钮触发事件
+    function modalToggleVote(e) {
+        if(e) e.stopPropagation();
+        const item = currentData.items[currentModalIndex];
+        if(!item) return;
+        
+        const groupName = item.group || '默认分组';
+        const log = getLocalLog();
+        const groupLog = log[groupName] || [];
+        const isSelected = groupLog.includes(currentModalIndex);
+        const votesLeft = globalMaxVotes - groupLog.length;
+
+        if (!isSelected && votesLeft <= 0) {
+            showToast("⛔ 本组票数已用尽", "⛔");
+            return;
+        }
+
+        toggleVote(currentModalIndex, groupName);
+        updateModalUI(); // 投票后刷新弹窗按钮 UI
+    }
+
+    // 监听键盘方向键，实现快捷翻页
+    document.addEventListener('keydown', function(e) {
+        if (document.getElementById('modal').style.display === 'flex') {
+            if (e.key === 'ArrowLeft') prevImage();
+            if (e.key === 'ArrowRight') nextImage();
+            if (e.key === 'Escape') closeModal({target: document.getElementById('modal')});
+        }
+    });
+
+    // --- 后台功能 (维持不变) ---
     function toggleAdmin() {
         if (!isAdmin) {
             if (prompt("验证:") === "123456") { 
@@ -343,12 +439,10 @@
         document.getElementById('stat-topgroup').innerText = total === 0 ? '-' : topGroup;
     }
 
-    // 更新分组建议列表（从服务器数据提取）
     function updateGroupSuggestions(items) {
         const groups = new Set();
         items.forEach(item => { if(item.group) groups.add(item.group); });
         if(groups.size === 0) { groups.add("");  }
-        
         const datalist = document.getElementById('group-suggestions');
         datalist.innerHTML = '';
         groups.forEach(g => {
@@ -358,17 +452,13 @@
         });
     }
 
-    // 实时提取页面上正在编辑的组名并更新下拉列表（修复联想问题）
     function refreshLocalSuggestions() {
         const groups = new Set();
-        // 1. 获取服务器已保存的组名
         (currentData.items || []).forEach(item => { if(item.group) groups.add(item.group); });
-        // 2. 实时获取当前页面输入框里的组名
         document.querySelectorAll('.edit-group').forEach(input => {
             const val = input.value.trim();
             if(val) groups.add(val);
         });
-        // 3. 重新生成下拉列表
         const datalist = document.getElementById('group-suggestions');
         datalist.innerHTML = '';
         groups.forEach(g => {
@@ -383,13 +473,11 @@
         list.innerHTML = '';
         items.forEach((item, index) => list.appendChild(createAdminRow(item, index)));
     }
-    
     function addNewRow() { document.getElementById('admin-list').appendChild(createAdminRow({}, null)); }
     
     function createAdminRow(item, index) {
         const div = document.createElement('div'); div.className = 'admin-item';
         const img = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入</span>`;
-        // 加入 oninput 绑定实现实时联想
         div.innerHTML = `
             <div style="flex:0.5;display:flex;flex-direction:column;gap:5px">
                 <label style="font-size:10px;color:#aaa">组名</label>
@@ -419,13 +507,11 @@
             db.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
         }
     }
-    
     function deleteAllItems() { if(confirm("确认删除？")) db.ref('sparkVote/items').set([]); }
     function handleDrop(e,z){e.preventDefault();const f=e.dataTransfer.files[0];if(f)processFile(f,z);}
     function handlePaste(e,z){const i=(e.clipboardData||e.originalEvent.clipboardData).items;for(let x of i)if(x.type.includes("image")){e.preventDefault();processFile(x.getAsFile(),z);return;}}
     function handleFileSelect(e,z){if(e.target.files[0])processFile(e.target.files[0],z);}
     
-    // 放大图片尺寸上限并提高画质（修复尺寸和清晰度问题）
     function processFile(f,z){
         z.innerHTML='...';const r=new FileReader();
         r.onload=e=>{const i=new Image();i.src=e.target.result;i.onload=()=>{
