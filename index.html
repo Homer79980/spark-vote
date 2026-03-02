@@ -28,14 +28,14 @@
         /* 缩略图模式优化：完整显示，不裁切 */
         .card-img-wrapper { 
             width: 100%; height: 160px; overflow: hidden; cursor: zoom-in; position: relative; 
-            background: #f8f9fa; padding: 12px; box-sizing: border-box; /* 增加内边距 */
+            background: #f8f9fa; padding: 12px; box-sizing: border-box;
             display: flex; align-items: center; justify-content: center;
         }
         .card-img-wrapper img { 
             max-width: 100%; max-height: 100%; width: auto; height: auto; 
-            object-fit: contain; /* 关键：完整显示 */
+            object-fit: contain; 
             transition: 0.3s; border-radius: 4px; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08); /* 给图片加点阴影，更有层次 */
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
         }
         .card:hover .card-img-wrapper img { transform: scale(1.05); } 
 
@@ -87,7 +87,6 @@
         .config-bar { background: #e3f2fd; padding: 10px; border-radius: 4px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: #0277bd; font-size: 14px; }
         .admin-item { display: flex; gap: 10px; margin-bottom: 10px; align-items: stretch; background: #fafafa; padding: 8px; border: 1px solid #eee; }
         
-        /* 针对分组输入的特殊样式，显示下拉箭头 */
         .edit-group { cursor: pointer; }
         
         .drop-zone { flex: 2; border: 2px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999; cursor: pointer; min-height: 60px; }
@@ -168,7 +167,7 @@
         if (isAdmin) {
             renderAdminView(data.items || []);
             updateDashboard(data);
-            updateGroupSuggestions(data.items || []); // 更新分组下拉列表
+            updateGroupSuggestions(data.items || []);
             document.getElementById('maxVoteInput').value = globalMaxVotes;
         }
     });
@@ -303,8 +302,17 @@
         box.classList.add('show');
         setTimeout(() => box.classList.remove('show'), 1000);
     }
-    function openModal(index) { document.getElementById('modalImg').src = document.getElementById(`img-${index}`).src; document.getElementById('modal').style.display = 'flex'; document.body.style.overflow = 'hidden'; }
-    function closeModal() { document.getElementById('modal').style.display = 'none'; document.body.style.overflow = 'auto'; }
+    
+    function openModal(index) { 
+        document.getElementById('modalImg').src = document.getElementById(`img-${index}`).src; 
+        document.getElementById('modal').style.display = 'flex'; 
+        document.body.style.overflow = 'hidden'; 
+    }
+    
+    function closeModal() { 
+        document.getElementById('modal').style.display = 'none'; 
+        document.body.style.overflow = 'auto'; 
+    }
 
     // --- 后台功能 ---
     function toggleAdmin() {
@@ -317,7 +325,10 @@
                 updateGroupSuggestions(currentData.items || []);
                 document.getElementById('maxVoteInput').value = globalMaxVotes; 
             }
-        } else { isAdmin = false; document.getElementById('admin-panel').style.display = 'none'; }
+        } else { 
+            isAdmin = false; 
+            document.getElementById('admin-panel').style.display = 'none'; 
+        }
     }
 
     function updateDashboard(data) {
@@ -332,15 +343,32 @@
         document.getElementById('stat-topgroup').innerText = total === 0 ? '-' : topGroup;
     }
 
-    // --- 新增：智能更新分组建议列表 ---
+    // 更新分组建议列表（从服务器数据提取）
     function updateGroupSuggestions(items) {
-        // 提取所有唯一的分组名
         const groups = new Set();
         items.forEach(item => { if(item.group) groups.add(item.group); });
-        
-        // 增加一些默认建议（可选）
         if(groups.size === 0) { groups.add("");  }
+        
+        const datalist = document.getElementById('group-suggestions');
+        datalist.innerHTML = '';
+        groups.forEach(g => {
+            const option = document.createElement('option');
+            option.value = g;
+            datalist.appendChild(option);
+        });
+    }
 
+    // 实时提取页面上正在编辑的组名并更新下拉列表（修复联想问题）
+    function refreshLocalSuggestions() {
+        const groups = new Set();
+        // 1. 获取服务器已保存的组名
+        (currentData.items || []).forEach(item => { if(item.group) groups.add(item.group); });
+        // 2. 实时获取当前页面输入框里的组名
+        document.querySelectorAll('.edit-group').forEach(input => {
+            const val = input.value.trim();
+            if(val) groups.add(val);
+        });
+        // 3. 重新生成下拉列表
         const datalist = document.getElementById('group-suggestions');
         datalist.innerHTML = '';
         groups.forEach(g => {
@@ -355,16 +383,17 @@
         list.innerHTML = '';
         items.forEach((item, index) => list.appendChild(createAdminRow(item, index)));
     }
+    
     function addNewRow() { document.getElementById('admin-list').appendChild(createAdminRow({}, null)); }
     
     function createAdminRow(item, index) {
         const div = document.createElement('div'); div.className = 'admin-item';
         const img = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入</span>`;
-        // 注意：这里的 input 增加了 list="group-suggestions" 属性
+        // 加入 oninput 绑定实现实时联想
         div.innerHTML = `
             <div style="flex:0.5;display:flex;flex-direction:column;gap:5px">
                 <label style="font-size:10px;color:#aaa">组名</label>
-                <input class="edit-group" list="group-suggestions" value="${item.group||''}" placeholder="选择或输入" style="padding:5px;border:1px solid #ddd;border-radius:4px">
+                <input class="edit-group" list="group-suggestions" value="${item.group||''}" placeholder="选择或输入" oninput="refreshLocalSuggestions()" style="padding:5px;border:1px solid #ddd;border-radius:4px">
             </div>
             <div style="flex:1;display:flex;flex-direction:column;gap:5px"><label style="font-size:10px;color:#aaa">名称</label><input class="edit-name" value="${item.name||''}" placeholder="名称" style="padding:5px;border:1px solid #ddd;border-radius:4px"></div>
             <div class="drop-zone" onclick="this.querySelector('input').click()" ondragover="event.preventDefault()" ondrop="handleDrop(event,this)" onpaste="handlePaste(event,this)">${img}<input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url" value="${item.url||''}"></div>
@@ -390,18 +419,27 @@
             db.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
         }
     }
+    
     function deleteAllItems() { if(confirm("确认删除？")) db.ref('sparkVote/items').set([]); }
     function handleDrop(e,z){e.preventDefault();const f=e.dataTransfer.files[0];if(f)processFile(f,z);}
     function handlePaste(e,z){const i=(e.clipboardData||e.originalEvent.clipboardData).items;for(let x of i)if(x.type.includes("image")){e.preventDefault();processFile(x.getAsFile(),z);return;}}
     function handleFileSelect(e,z){if(e.target.files[0])processFile(e.target.files[0],z);}
+    
+    // 放大图片尺寸上限并提高画质（修复尺寸和清晰度问题）
     function processFile(f,z){
         z.innerHTML='...';const r=new FileReader();
         r.onload=e=>{const i=new Image();i.src=e.target.result;i.onload=()=>{
-            const c=document.createElement('canvas');const s=800/i.width;c.width=i.width>800?800:i.width;c.height=i.width>800?i.height*s:i.height;
-            c.getContext('2d').drawImage(i,0,0,c.width,c.height);const b=c.toDataURL('image/jpeg',0.7);
-            z.innerHTML=`<img src="${b}" class="preview-thumb"><input type="file" hidden onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url" value="${b}">`;
+            const c=document.createElement('canvas');
+            const MAX_WIDTH = 1920; 
+            const s=MAX_WIDTH/i.width;
+            c.width=i.width>MAX_WIDTH?MAX_WIDTH:i.width;
+            c.height=i.width>MAX_WIDTH?i.height*s:i.height;
+            c.getContext('2d').drawImage(i,0,0,c.width,c.height);
+            const b=c.toDataURL('image/jpeg',0.9);
+            z.innerHTML=`<img src="${b}" class="preview-thumb"><input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url" value="${b}">`;
         }};r.readAsDataURL(f);
     }
+    
     function saveAll() {
         const rows = document.querySelectorAll('#admin-list .admin-item');
         let ni = [];
