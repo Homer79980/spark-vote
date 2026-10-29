@@ -34,13 +34,47 @@ async function main(){
         await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
         assert.match(await page.locator('.card .stats').innerText(),/1 票/);
+        await page.locator('#batch-group').fill('批量 A');
+        const chooserPromise = page.waitForEvent('filechooser');
+        await page.getByRole('button',{name:'选择多张图片',exact:true}).click();
+        const chooser = await chooserPromise;
+        assert.equal(chooser.isMultiple(),true);
+        const selected=Array.from({length:12},(_,i)=>({...image,name:`方案${i+1}.png`}));
+        await chooser.setFiles(selected);
+        await page.waitForFunction(()=>document.querySelector('#batch-status').textContent.includes('已添加 12 张'));
+        assert.equal(await page.locator('.admin-item').count(),13);
+        assert.equal(await page.locator('.edit-name').nth(1).inputValue(),'方案1');
+        assert.equal(await page.locator('.edit-group').nth(12).inputValue(),'批量 A');
+        // Construct files only; dispatchEvent is Playwright's drop simulation.
+        const dropped=await page.evaluateHandle(({bytes})=>{
+            const transfer=new DataTransfer();
+            transfer.items.add(new File([new Uint8Array(bytes)],'拖入一.png',{type:'image/png'}));
+            transfer.items.add(new File([new Uint8Array(bytes)],'图<测试>.png',{type:'image/png'}));
+            transfer.items.add(new File(['broken'],'损坏.png',{type:'image/png'}));
+            transfer.items.add(new File(['not an image'],'说明.txt',{type:'text/plain'}));
+            return transfer;
+        },{bytes:Array.from(image.buffer)});
+        await page.locator('#batch-upload').dispatchEvent('drop',{dataTransfer:dropped});
+        await dropped.dispose();
+        await page.waitForFunction(()=>document.querySelector('#batch-status').textContent.includes('已添加 2 张图片'));
+        assert.match(await page.locator('#batch-status').innerText(),/2 个文件未添加/);
+        assert.equal(await page.locator('.admin-item').count(),15);
+        await page.locator('.drop-zone input[type=file]').first().setInputFiles([{...image,name:'替换.png'},{...image,name:'附加.png'}]);
+        await page.waitForFunction(()=>document.querySelectorAll('.admin-item').length===16);
+        await page.waitForFunction(()=>!document.querySelector('#save-button').disabled);
+        await page.locator('#save-button').click();
+        await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
+        await page.reload();
+        assert.equal(await page.locator('.card').count(),16,'all batch images must survive refresh');
+        assert.ok((await page.locator('.card-name').allTextContents()).includes('图<测试>'),'filenames must render as text');
+        await page.locator('.footer').click();
         const screenshot=process.env.SPARK_SCREENSHOT_DIR;
         if(screenshot){fs.mkdirSync(screenshot,{recursive:true});await page.screenshot({path:path.join(screenshot,'desktop.png'),fullPage:true});}
         await page.setViewportSize({width:390,height:844});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile view must not overflow');
         if(screenshot)await page.screenshot({path:path.join(screenshot,'mobile.png'),fullPage:true});
         assert.deepEqual(errors,[]);
-        console.log('PASS: image selection, filename, confirmed save, reload, realtime preservation, server rejection/retry, votes preserved, mobile layout.');
+        console.log('PASS: single image; filename; confirmed save/reload; realtime draft preservation; rejection/retry; votes preserved; 12-file picker; mixed drop with 2 bad files; row multi-select; all 16 images after refresh; escaped filename; mobile layout.');
     }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

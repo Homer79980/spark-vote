@@ -91,6 +91,15 @@
         .admin-item > div { min-width: 0; }
         .drop-zone { position: relative; overflow: hidden; }
         .drop-zone.processing::after { content: '正在处理…'; position: absolute; inset: 0; display: grid; place-items: center; background: rgba(255,255,255,.9); }
+        .batch-upload { border: 2px dashed #90c6ed; background: #f4faff; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+        .batch-upload.drag-over { border-color: var(--spark-blue); background: #dcefff; }
+        .batch-upload h4 { margin: 0 0 8px; }
+        .batch-upload p { font-size: 13px; color: #636e72; margin: 8px 0; line-height: 1.6; }
+        .batch-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .batch-actions input { border: 1px solid #cbd5df; border-radius: 4px; padding: 9px; max-width: 100%; box-sizing: border-box; }
+        .batch-actions button { border: 0; border-radius: 4px; padding: 10px 16px; background: var(--spark-blue); color: white; cursor: pointer; }
+        #batch-progress { width: 100%; margin-top: 10px; }
+        #batch-status { overflow-wrap: anywhere; }
         @media (max-width: 600px) {
             body { padding: 12px; }
             #admin-panel { padding: 14px; }
@@ -147,6 +156,20 @@
             <span>票</span>
         </div>
         <datalist id="group-suggestions"></datalist>
+        <section id="batch-upload" class="batch-upload" aria-label="批量添加图片"
+            ondragover="event.preventDefault(); this.classList.add('drag-over')"
+            ondragleave="this.classList.remove('drag-over')" ondrop="handleBatchDrop(event)">
+            <h4>📷 批量添加图片</h4>
+            <p>把多张图片一起拖到这里，或点击按钮多选。每张图自动生成一个选项，名称使用文件名。</p>
+            <div class="batch-actions">
+                <label for="batch-group">统一分组</label>
+                <input id="batch-group" list="group-suggestions" placeholder="默认分组（可修改）">
+                <button id="batch-select-button" type="button" onclick="document.getElementById('batch-file-input').click()">选择多张图片</button>
+                <input id="batch-file-input" type="file" accept="image/*" multiple hidden onchange="handleBatchSelect(event)">
+            </div>
+            <progress id="batch-progress" value="0" max="1" hidden></progress>
+            <p id="batch-status" role="status" aria-live="polite">添加完成后，点击下方“保存更新”。</p>
+        </section>
         <div id="admin-list"></div>
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
             <button onclick="addNewRow()" style="background:#0984e3; color:white; flex:1; padding:10px;">+ 新增</button>
@@ -189,13 +212,14 @@
     let globalMaxVotes = 1;
     let currentModalIndex = 0; // 新增：用于记录当前弹窗展示的图片索引
     const colorPalette = ['#0984e3', '#00b894', '#6c5ce7', '#e17055', '#fdcb6e', '#e84393', '#2d3436', '#00cec9'];
-    let groupColorMap = {};
+    let groupColorMap = Object.create(null);
     let adminDirty = false;
     let saving = false;
     let processingImages = 0;
     let dataLoaded = false;
     let databaseConnected = false;
     let editorBaseline = '';
+    let batchImporting = false;
 
     function setSaveStatus(message, kind = '') {
         const status = document.getElementById('save-status');
@@ -268,7 +292,7 @@
         const container = document.getElementById('voteContainer');
         container.innerHTML = '';
         const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
-        const groupedItems = {};
+        const groupedItems = Object.create(null);
         const log = getLocalLog();
 
         items.forEach((item, index) => {
@@ -489,7 +513,7 @@
         document.getElementById('stat-headcount').innerText = data.headcount || 0;
         const total = items.reduce((sum, item) => sum + (item.votes || 0), 0);
         document.getElementById('stat-totalvotes').innerText = total;
-        const groupCounts = {};
+        const groupCounts = Object.create(null);
         items.forEach(i => { const g = i.group || '默认'; groupCounts[g] = (groupCounts[g] || 0) + (i.votes || 0); });
         let topGroup = '-', maxVal = -1;
         Object.entries(groupCounts).forEach(([name, count]) => { if(count > maxVal) { maxVal = count; topGroup = name; } });
@@ -546,7 +570,7 @@
                 <input class="edit-group" list="group-suggestions" placeholder="选择或输入" oninput="refreshLocalSuggestions()" style="padding:5px;border:1px solid #ddd;border-radius:4px">
             </div>
             <div style="flex:1;display:flex;flex-direction:column;gap:5px"><label style="font-size:10px;color:#aaa">名称</label><input class="edit-name" placeholder="导入图片后自动填写" style="padding:5px;border:1px solid #ddd;border-radius:4px"></div>
-            <div class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入图片" ondragover="event.preventDefault()" ondrop="handleDrop(event,this)" onpaste="handlePaste(event,this)"><span class="image-preview">📷 拖入 / 点击选图</span><input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url"></div>
+            <div class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入图片" ondragover="event.preventDefault()" ondrop="handleDrop(event,this)" onpaste="handlePaste(event,this)"><span class="image-preview">📷 拖入 / 点击选图</span><input type="file" hidden accept="image/*" multiple onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url"></div>
             <button class="remove-row" title="移除这项" style="background:#ff7675;color:white;border:none;border-radius:4px;padding:0 10px;">✕</button>`;
         div.querySelector('.edit-group').value = item.group || '';
         div.querySelector('.edit-name').value = item.name || '';
@@ -592,9 +616,72 @@
         }
     }
     function deleteAllItems() { if(confirm("确认删除？")) db.ref('sparkVote/items').set([]); }
-    function handleDrop(e,z){e.preventDefault();const f=e.dataTransfer.files[0];if(f)processFile(f,z);}
-    function handlePaste(e,z){const i=(e.clipboardData||e.originalEvent.clipboardData).items;for(let x of i)if(x.type.includes("image")){e.preventDefault();processFile(x.getAsFile(),z);return;}}
-    function handleFileSelect(e,z){if(e.target.files[0])processFile(e.target.files[0],z);}
+    function handleDrop(event, zone) {
+        event.preventDefault();
+        event.stopPropagation();
+        return handleRowFiles(Array.from(event.dataTransfer.files), zone);
+    }
+    function handlePaste(event, zone) {
+        const clipboard = event.clipboardData || event.originalEvent?.clipboardData;
+        const files = Array.from(clipboard?.items || []).filter(item => item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean);
+        if (files.length) { event.preventDefault(); return handleRowFiles(files, zone); }
+    }
+    function handleFileSelect(event, zone) { return handleRowFiles(Array.from(event.target.files), zone); }
+    async function handleRowFiles(files, zone) {
+        if (!files.length || saving || processingImages) return;
+        const group = zone.closest('.admin-item').querySelector('.edit-group').value.trim() || '默认分组';
+        await processFile(files[0], zone);
+        if (files.length > 1) await importImageFiles(files.slice(1), group);
+    }
+    function handleBatchDrop(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        document.getElementById('batch-upload').classList.remove('drag-over');
+        return importImageFiles(Array.from(event.dataTransfer.files));
+    }
+    async function handleBatchSelect(event) {
+        const files = Array.from(event.target.files);
+        await importImageFiles(files);
+        event.target.value = '';
+    }
+    async function importImageFiles(files, group) {
+        if (!files.length) return;
+        const status = document.getElementById('batch-status');
+        if (saving || processingImages || batchImporting) { status.textContent = '正在处理上一批图片或保存，请稍候再添加。'; return; }
+        group = group || document.getElementById('batch-group').value.trim() || '默认分组';
+        batchImporting = true;
+        processingImages++;
+        markAdminDirty();
+        document.getElementById('save-button').disabled = true;
+        document.getElementById('batch-select-button').disabled = true;
+        const progress = document.getElementById('batch-progress');
+        progress.hidden = false;
+        progress.max = files.length;
+        progress.value = 0;
+        let added = 0;
+        const failures = [];
+        try {
+            for (const [index, file] of files.entries()) {
+                status.textContent = `正在处理 ${index + 1} / ${files.length}：${file.name}`;
+                try {
+                    const url = await prepareImage(file);
+                    const name = file.name.replace(/\.[^.]+$/, '') || `图片 ${index + 1}`;
+                    document.getElementById('admin-list').appendChild(createAdminRow({name, url, group}, null));
+                    added++;
+                } catch (error) { failures.push(`${file.name}（${error.message}）`); }
+                progress.value = index + 1;
+            }
+            refreshLocalSuggestions();
+            status.textContent = `已添加 ${added} 张图片${failures.length ? `，${failures.length} 个文件未添加：${failures.join('；')}` : ''}。`;
+            setSaveStatus(added ? `已添加 ${added} 个选项，请点击“保存更新”。` : '没有添加新图片，请查看批量导入提示。', added ? '' : 'error');
+        } finally {
+            batchImporting = false;
+            processingImages--;
+            progress.hidden = true;
+            document.getElementById('batch-select-button').disabled = false;
+            document.getElementById('save-button').disabled = saving || processingImages > 0;
+        }
+    }
     
     async function processFile(file, zone) {
         if (saving || zone.dataset.processing) return false;
