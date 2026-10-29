@@ -83,6 +83,22 @@
         .edit-group { cursor: pointer; }
         .drop-zone { flex: 2; border: 2px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999; cursor: pointer; min-height: 60px; }
         .drop-zone img.preview-thumb { height: 50px; }
+        .save-status { margin: 12px 0; font-size: 13px; line-height: 1.6; color: #636e72; overflow-wrap: anywhere; }
+        .save-status.error { color: #c0392b; }
+        .save-status.success { color: #00856b; }
+        button:disabled { opacity: 0.55; cursor: wait; }
+        .admin-item input { min-width: 0; width: 100%; box-sizing: border-box; }
+        .admin-item > div { min-width: 0; }
+        .drop-zone { position: relative; overflow: hidden; }
+        .drop-zone.processing::after { content: '正在处理…'; position: absolute; inset: 0; display: grid; place-items: center; background: rgba(255,255,255,.9); }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            #admin-panel { padding: 14px; }
+            .stats-dashboard { gap: 6px; padding: 6px; }
+            .stat-card { padding: 8px 4px; }
+            .admin-item { flex-wrap: wrap; }
+            .admin-item .drop-zone { flex-basis: 100%; min-height: 80px; }
+        }
         
         /* === 弹窗 (画廊模式) 升级样式 === */
         #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 9999; justify-content: center; align-items: center; }
@@ -134,9 +150,10 @@
         <div id="admin-list"></div>
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
             <button onclick="addNewRow()" style="background:#0984e3; color:white; flex:1; padding:10px;">+ 新增</button>
-            <button onclick="saveAll()" style="background:#2d3436; color:white; flex:2; padding:10px;">💾 保存更新</button>
+            <button id="save-button" onclick="saveAll()" style="background:#2d3436; color:white; flex:2; padding:10px;">💾 保存更新</button>
             <button onclick="exportData()" style="background:#00b894; color:white; flex:1.5; padding:10px;">📥 导出Excel</button>
         </div>
+        <p id="save-status" class="save-status" role="status" aria-live="polite">正在连接，请稍候…</p>
         <div style="margin-top:20px; border-top:1px dashed #ccc; padding-top:15px; display:flex; gap:10px;">
             <button onclick="resetAllVotes()" style="color:#d63031; background:white; border:1px solid #fab1a0; flex:1; font-size:12px;">⚠️ 清空所有 (含人数)</button>
             <button onclick="deleteAllItems()" style="color:#d63031; background:white; border:1px solid #fab1a0; flex:1; font-size:12px;">🗑️ 删除所有</button>
@@ -173,11 +190,49 @@
     let currentModalIndex = 0; // 新增：用于记录当前弹窗展示的图片索引
     const colorPalette = ['#0984e3', '#00b894', '#6c5ce7', '#e17055', '#fdcb6e', '#e84393', '#2d3436', '#00cec9'];
     let groupColorMap = {};
+    let adminDirty = false;
+    let saving = false;
+    let processingImages = 0;
+    let dataLoaded = false;
+    let databaseConnected = false;
+    let editorBaseline = '';
+
+    function setSaveStatus(message, kind = '') {
+        const status = document.getElementById('save-status');
+        status.textContent = message;
+        status.className = `save-status ${kind}`;
+    }
+
+    function markAdminDirty() {
+        adminDirty = true;
+        setSaveStatus('有未保存的修改，请点击“保存更新”。');
+    }
+
+    function metadataSignature(data) {
+        return JSON.stringify({ round: data.round || 0, maxVotes: data.maxVotes || 1,
+            items: (data.items || []).map(item => item && ({ name: item.name || '', group: item.group || '', url: item.url || '' })) });
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    document.getElementById('admin-list').addEventListener('input', markAdminDirty);
+    document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
+    window.addEventListener('beforeunload', event => {
+        if (adminDirty || saving || processingImages) { event.preventDefault(); event.returnValue = ''; }
+    });
+    db.ref('.info/connected').on('value', snapshot => {
+        databaseConnected = snapshot.val() === true;
+        if (!databaseConnected) setSaveStatus('连接已断开，编辑内容仍在当前页面。请等待连接恢复后保存。', 'error');
+        else if (!adminDirty && !saving) setSaveStatus('已连接，可以编辑并保存。');
+    });
 
     // --- 实时监听 ---
     db.ref('sparkVote').on('value', (snapshot) => {
         const data = snapshot.val() || { items: [], round: 0, maxVotes: 1, headcount: 0 };
         currentData = data;
+        dataLoaded = true;
         globalMaxVotes = data.maxVotes || 1;
         checkRoundVersion(data.round || 0);
         renderUserView(data.items || []);
@@ -188,12 +243,14 @@
         }
         
         if (isAdmin) {
-            renderAdminView(data.items || []);
             updateDashboard(data);
-            updateGroupSuggestions(data.items || []);
-            document.getElementById('maxVoteInput').value = globalMaxVotes;
+            if (!adminDirty && !saving && !processingImages) {
+                renderAdminView(data.items || []);
+                updateGroupSuggestions(data.items || []);
+                document.getElementById('maxVoteInput').value = globalMaxVotes;
+            }
         }
-    });
+    }, error => setSaveStatus(`读取失败，暂不能保存：${error.message || error.code}`, 'error'));
 
     function checkRoundVersion(serverRound) {
         const localRound = parseInt(localStorage.getItem('spark_vote_round') || '-1');
@@ -236,7 +293,7 @@
                 const statusHtml = isFull 
                     ? `<span class="group-status voted">✅ 已完成</span>` 
                     : `<span class="group-status">剩余 ${votesLeft} 票</span>`;
-                section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${groupName}</span> ${statusHtml}</h2>`;
+                section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${escapeHtml(groupName)}</span> ${statusHtml}</h2>`;
             }
 
             const grid = document.createElement('div');
@@ -248,7 +305,7 @@
                 let btnClass = "vote-action-btn";
                 let btnText = "👍 投一票";
                 let btnStyle = `style="border-color:${themeColor}; color:${themeColor}"`;
-                let clickAction = `onclick="toggleVote(${item.originalIndex}, '${groupName}')"`;
+                let clickAction = `data-group="${escapeHtml(groupName)}" onclick="toggleVote(${item.originalIndex}, this.dataset.group)"`;
 
                 if (isSelected) {
                     btnClass += " selected"; btnText = "✅ 已选 (撤销)"; btnStyle = "";
@@ -260,11 +317,11 @@
                 card.className = 'card';
                 card.innerHTML = `
                     <div class="card-img-wrapper" onclick="openModal(${item.originalIndex})">
-                        <img id="img-${item.originalIndex}" src="${item.url || 'https://via.placeholder.com/400x300?text=No+Image'}">
+                        <img id="img-${item.originalIndex}" src="${escapeHtml(item.url || 'https://via.placeholder.com/400x300?text=No+Image')}">
                     </div>
                     <div class="card-body">
                         <div>
-                            <span class="card-name">${item.name || '未命名'}</span>
+                            <span class="card-name">${escapeHtml(item.name || '未命名')}</span>
                             <div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div>
                             <div class="stats">${item.votes || 0} 票 (${percent}%)</div>
                         </div>
@@ -416,10 +473,10 @@
             if (prompt("验证:") === "123456") { 
                 isAdmin = true; 
                 document.getElementById('admin-panel').style.display = 'block'; 
-                renderAdminView(currentData.items || []); 
+                if (!adminDirty) renderAdminView(currentData.items || []);
                 updateDashboard(currentData);
                 updateGroupSuggestions(currentData.items || []);
-                document.getElementById('maxVoteInput').value = globalMaxVotes; 
+                if (!adminDirty) document.getElementById('maxVoteInput').value = globalMaxVotes;
             }
         } else { 
             isAdmin = false; 
@@ -472,21 +529,48 @@
         const list = document.getElementById('admin-list');
         list.innerHTML = '';
         items.forEach((item, index) => list.appendChild(createAdminRow(item, index)));
+        editorBaseline = metadataSignature(currentData);
     }
-    function addNewRow() { document.getElementById('admin-list').appendChild(createAdminRow({}, null)); }
+    function addNewRow() {
+        if (saving) return;
+        document.getElementById('admin-list').appendChild(createAdminRow({}, null));
+        markAdminDirty();
+    }
     
     function createAdminRow(item, index) {
         const div = document.createElement('div'); div.className = 'admin-item';
-        const img = item.url ? `<img src="${item.url}" class="preview-thumb">` : `<span>📷 拖入</span>`;
+        div.dataset.originalIndex = index == null ? '' : String(index);
         div.innerHTML = `
             <div style="flex:0.5;display:flex;flex-direction:column;gap:5px">
                 <label style="font-size:10px;color:#aaa">组名</label>
-                <input class="edit-group" list="group-suggestions" value="${item.group||''}" placeholder="选择或输入" oninput="refreshLocalSuggestions()" style="padding:5px;border:1px solid #ddd;border-radius:4px">
+                <input class="edit-group" list="group-suggestions" placeholder="选择或输入" oninput="refreshLocalSuggestions()" style="padding:5px;border:1px solid #ddd;border-radius:4px">
             </div>
-            <div style="flex:1;display:flex;flex-direction:column;gap:5px"><label style="font-size:10px;color:#aaa">名称</label><input class="edit-name" value="${item.name||''}" placeholder="名称" style="padding:5px;border:1px solid #ddd;border-radius:4px"></div>
-            <div class="drop-zone" onclick="this.querySelector('input').click()" ondragover="event.preventDefault()" ondrop="handleDrop(event,this)" onpaste="handlePaste(event,this)">${img}<input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url" value="${item.url||''}"></div>
-            <button onclick="this.parentElement.remove()" style="background:#ff7675;color:white;border:none;border-radius:4px;padding:0 10px;">✕</button>`;
+            <div style="flex:1;display:flex;flex-direction:column;gap:5px"><label style="font-size:10px;color:#aaa">名称</label><input class="edit-name" placeholder="导入图片后自动填写" style="padding:5px;border:1px solid #ddd;border-radius:4px"></div>
+            <div class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入图片" ondragover="event.preventDefault()" ondrop="handleDrop(event,this)" onpaste="handlePaste(event,this)"><span class="image-preview">📷 拖入 / 点击选图</span><input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url"></div>
+            <button class="remove-row" title="移除这项" style="background:#ff7675;color:white;border:none;border-radius:4px;padding:0 10px;">✕</button>`;
+        div.querySelector('.edit-group').value = item.group || '';
+        div.querySelector('.edit-name').value = item.name || '';
+        const zone = div.querySelector('.drop-zone');
+        setImagePreview(zone, item.url || '');
+        zone.addEventListener('click', event => {
+            if (saving || zone.dataset.processing || event.target.tagName === 'INPUT') return;
+            zone.querySelector('input[type="file"]').click();
+        });
+        zone.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); zone.click(); }
+        });
+        div.querySelector('.remove-row').addEventListener('click', () => {
+            if (saving || processingImages) return;
+            if (confirm('移除这个选项？保存更新后才会生效。')) { div.remove(); markAdminDirty(); }
+        });
         return div;
+    }
+
+    function setImagePreview(zone, url) {
+        zone.querySelector('.edit-url').value = url;
+        const preview = zone.querySelector('.image-preview');
+        preview.textContent = url ? '' : '📷 拖入 / 点击选图';
+        if (url) { const image = document.createElement('img'); image.src = url; image.className = 'preview-thumb'; image.alt = '图片预览'; preview.appendChild(image); }
     }
 
     function exportData() {
@@ -512,28 +596,105 @@
     function handlePaste(e,z){const i=(e.clipboardData||e.originalEvent.clipboardData).items;for(let x of i)if(x.type.includes("image")){e.preventDefault();processFile(x.getAsFile(),z);return;}}
     function handleFileSelect(e,z){if(e.target.files[0])processFile(e.target.files[0],z);}
     
-    function processFile(f,z){
-        z.innerHTML='...';const r=new FileReader();
-        r.onload=e=>{const i=new Image();i.src=e.target.result;i.onload=()=>{
-            const c=document.createElement('canvas');
-            const MAX_WIDTH = 1920; 
-            const s=MAX_WIDTH/i.width;
-            c.width=i.width>MAX_WIDTH?MAX_WIDTH:i.width;
-            c.height=i.width>MAX_WIDTH?i.height*s:i.height;
-            c.getContext('2d').drawImage(i,0,0,c.width,c.height);
-            const b=c.toDataURL('image/jpeg',0.9);
-            z.innerHTML=`<img src="${b}" class="preview-thumb"><input type="file" hidden accept="image/*" onchange="handleFileSelect(event,this.parentElement)"><input type="hidden" class="edit-url" value="${b}">`;
-        }};r.readAsDataURL(f);
+    async function processFile(file, zone) {
+        if (saving || zone.dataset.processing) return false;
+        processingImages++;
+        zone.dataset.processing = 'true';
+        zone.classList.add('processing');
+        document.getElementById('save-button').disabled = true;
+        markAdminDirty();
+        try {
+            const url = await prepareImage(file);
+            setImagePreview(zone, url);
+            const name = zone.closest('.admin-item').querySelector('.edit-name');
+            if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '') || '未命名图片';
+            setSaveStatus('图片已就绪，请点击“保存更新”。');
+            return true;
+        } catch (error) {
+            setSaveStatus(`${file.name}：${error.message}。原图片已保留。`, 'error');
+            return false;
+        } finally {
+            processingImages--;
+            delete zone.dataset.processing;
+            zone.classList.remove('processing');
+            document.getElementById('save-button').disabled = saving || processingImages > 0;
+            zone.querySelector('input[type="file"]').value = '';
+        }
     }
-    
-    function saveAll() {
-        const rows = document.querySelectorAll('#admin-list .admin-item');
-        let ni = [];
-        rows.forEach(r => {
-            const g=r.querySelector('.edit-group').value.trim()||'默认分组', n=r.querySelector('.edit-name').value.trim(), u=r.querySelector('.edit-url').value;
-            if(n&&u) { const o=currentData.items?currentData.items.find(i=>i.url===u):null; ni.push({name:n,url:u,group:g,votes:o?o.votes:0}); }
+
+    function prepareImage(file) {
+        return new Promise((resolve, reject) => {
+            if (!file || !(/^image\//.test(file.type) || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name))) return reject(new Error('请选择浏览器支持的图片'));
+            if (file.size > 30 * 1024 * 1024) return reject(new Error('图片超过 30 MB，请缩小后重试'));
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('图片读取失败，请重试'));
+            reader.onabort = () => reject(new Error('图片读取已中断'));
+            reader.onload = () => {
+                const image = new Image();
+                image.onerror = () => reject(new Error('无法识别这张图片，请改用 PNG、JPG 或 WebP'));
+                image.onload = () => {
+                    try {
+                        const scale = Math.min(1, 1920 / image.width, 1920 / image.height);
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.max(1, Math.round(image.width * scale));
+                        canvas.height = Math.max(1, Math.round(image.height * scale));
+                        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+                        const url = canvas.toDataURL('image/webp', 0.88);
+                        if (!url.startsWith('data:image/') || url.length > 8 * 1024 * 1024) throw new Error('图片仍过大，请缩小后重试');
+                        resolve(url);
+                    } catch (error) { reject(error); }
+                };
+                image.src = reader.result;
+            };
+            reader.readAsDataURL(file);
         });
-        db.ref('sparkVote').update({ items:ni, maxVotes: parseInt(document.getElementById('maxVoteInput').value)||1 }).then(()=>alert("保存成功"));
+    }
+
+    async function saveAll() {
+        if (saving) return;
+        if (processingImages) return setSaveStatus('图片正在处理，请稍候再保存。', 'error');
+        if (!dataLoaded || !databaseConnected) return setSaveStatus('尚未连接到服务器，内容仍保留在当前页面，请连接恢复后再保存。', 'error');
+        const rows = Array.from(document.querySelectorAll('#admin-list .admin-item'));
+        const drafts = [];
+        for (const [index, row] of rows.entries()) {
+            const name = row.querySelector('.edit-name').value.trim();
+            const url = row.querySelector('.edit-url')?.value;
+            if (!name || !url) return setSaveStatus(`第 ${index + 1} 项缺少${!name ? '名称' : '图片'}，请补全后保存。所有编辑内容已保留。`, 'error');
+            const originalIndex = row.dataset.originalIndex;
+            drafts.push({ name, url, group: row.querySelector('.edit-group').value.trim() || '默认分组',
+                originalIndex: originalIndex === '' || originalIndex == null ? null : Number(originalIndex) });
+        }
+        const maxVotes = Number(document.getElementById('maxVoteInput').value);
+        if (!Number.isInteger(maxVotes) || maxVotes < 1 || maxVotes > 99) return setSaveStatus('每组限投票数须为 1 至 99 的整数。', 'error');
+        if (new TextEncoder().encode(JSON.stringify(drafts)).length > 15 * 1024 * 1024) return setSaveStatus('图片总量超过单次保存容量，请缩小图片后再保存。编辑内容已保留。', 'error');
+        saving = true;
+        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
+        setSaveStatus('正在保存，等待服务器确认…');
+        const noticeTimer = setTimeout(() => setSaveStatus('服务器尚未确认，请保留当前页面，连接恢复后会继续保存。'), 15000);
+        try {
+            const result = await db.ref('sparkVote').transaction(server => {
+                const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
+                if (metadataSignature(latest) !== editorBaseline) return;
+                const items = drafts.map(draft => ({ name: draft.name, group: draft.group, url: draft.url,
+                    votes: draft.originalIndex == null ? 0 : (latest.items?.[draft.originalIndex]?.votes || 0) }));
+                return { ...latest, items, maxVotes };
+            }, undefined, false);
+            if (!result.committed) throw new Error('其他管理员已修改选项，请先保留当前编辑内容，核对最新数据后再操作');
+            currentData = result.snapshot.val() || { items: [] };
+            globalMaxVotes = currentData.maxVotes || 1;
+            adminDirty = false;
+            renderAdminView(currentData.items || []);
+            renderUserView(currentData.items || []);
+            updateDashboard(currentData);
+            refreshLocalSuggestions();
+            setSaveStatus(`保存成功，服务器已确认 ${drafts.length} 个选项，刷新页面后仍会保留。`, 'success');
+        } catch (error) {
+            setSaveStatus(`保存失败：${error.message || error.code}。编辑内容已保留，请勿关闭页面。`, 'error');
+        } finally {
+            clearTimeout(noticeTimer);
+            saving = false;
+            document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = false; });
+        }
     }
 </script>
 </body>
