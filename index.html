@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spark工作室 - 内部投票系统</title>
-    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
         /* --- 基础样式 --- */
         :root { --spark-bg: #f1f2f6; --spark-dark: #2d3436; --spark-blue: #0984e3; }
@@ -168,7 +166,9 @@
                 <input id="batch-file-input" type="file" accept="image/*" multiple hidden onchange="handleBatchSelect(event)">
             </div>
             <progress id="batch-progress" value="0" max="1" hidden></progress>
-            <p id="batch-status" role="status" aria-live="polite">添加完成后，点击下方“保存更新”。</p>
+            <p id="batch-status" role="status" aria-live="polite">图片添加完成后会自动保存，请等待“保存成功”。</p>
+            <p id="upload-save-status" class="save-status" role="status" aria-live="polite"></p>
+            <p id="local-draft-status" class="save-status" role="status" aria-live="polite"></p>
         </section>
         <div id="admin-list"></div>
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
@@ -183,6 +183,8 @@
         </div>
     </div>
 
+    <p id="sync-status" class="save-status" role="status" aria-live="polite">正在加载已保存的图片，连接较慢时请稍候…</p>
+    <p id="local-draft-notice" class="save-status" role="status" hidden>发现尚未同步的图片草稿，请进入管理入口继续保存。</p>
     <div id="voteContainer"></div>
     <div class="footer" onclick="toggleAdmin()">Spark Studio Internal | 管理入口</div>
 </div>
@@ -202,6 +204,8 @@
     <button class="modal-nav next" onclick="nextImage(event)">&#10095;</button>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
 <script>
     const firebaseConfig = { databaseURL: "https://playa-dc7ae-default-rtdb.firebaseio.com/" };
     firebase.initializeApp(firebaseConfig);
@@ -215,22 +219,129 @@
     let groupColorMap = Object.create(null);
     let adminDirty = false;
     let saving = false;
+    let preparingSave = false;
     let processingImages = 0;
     let dataLoaded = false;
     let databaseConnected = false;
     let editorBaseline = '';
     let batchImporting = false;
+    let localDatabasePromise;
+    let localWriteChain = Promise.resolve();
+    let pendingDraft = null;
+    let draftRevision = 0;
 
     function setSaveStatus(message, kind = '') {
-        const status = document.getElementById('save-status');
-        status.textContent = message;
-        status.className = `save-status ${kind}`;
+        for (const id of ['save-status', 'upload-save-status']) {
+            const status = document.getElementById(id);
+            status.textContent = message;
+            status.className = `save-status ${kind}`;
+        }
     }
 
     function markAdminDirty() {
         adminDirty = true;
         setSaveStatus('有未保存的修改，请点击“保存更新”。');
+        persistEditorDraft();
     }
+
+    function openLocalDatabase() {
+        if (typeof indexedDB === 'undefined') return Promise.reject(new Error('当前浏览器不支持草稿存储'));
+        if (!localDatabasePromise) localDatabasePromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open('spark-vote-local-v1', 1);
+            request.onupgradeneeded = () => request.result.createObjectStore('state');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+            request.onblocked = () => reject(new Error('本机草稿存储暂时不可用'));
+        });
+        return localDatabasePromise;
+    }
+
+    async function readLocalState(key) {
+        const local = await openLocalDatabase();
+        return new Promise((resolve, reject) => {
+            const request = local.transaction('state', 'readonly').objectStore('state').get(key);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    function writeLocalState(key, value) {
+        const operation = localWriteChain.catch(() => {}).then(async () => {
+            const local = await openLocalDatabase();
+            await new Promise((resolve, reject) => {
+                const transaction = local.transaction('state', 'readwrite');
+                transaction.objectStore('state').put(value, key);
+                transaction.oncomplete = resolve;
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error || new Error('草稿写入中断'));
+            });
+        });
+        localWriteChain = operation;
+        return operation;
+    }
+
+    async function persistEditorDraft(state = 'pending') {
+        const revision = ++draftRevision;
+        const draft = { state, baseline: editorBaseline, maxVotes: document.getElementById('maxVoteInput').value,
+            group: document.getElementById('batch-group').value, updatedAt: Date.now(),
+            rows: Array.from(document.querySelectorAll('#admin-list .admin-item')).map(row => ({
+                name: row.querySelector('.edit-name').value, group: row.querySelector('.edit-group').value,
+                url: row.querySelector('.edit-url')?.value || '', originalIndex: row.dataset.originalIndex ?? ''
+            })) };
+        try {
+            await writeLocalState('draft', draft);
+            if (revision === draftRevision) {
+                pendingDraft = state === 'pending' ? draft : null;
+                document.getElementById('local-draft-notice').hidden = !pendingDraft;
+                const status = document.getElementById('local-draft-status');
+                status.className = 'save-status';
+                status.textContent = state === 'pending' ? '本机草稿已保存；刷新后进入管理入口可继续编辑，尚未同步的图片不会出现在其他设备。' : '';
+            }
+            return true;
+        } catch (error) {
+            const status = document.getElementById('local-draft-status');
+            status.className = 'save-status error';
+            status.textContent = `本机草稿保存失败：${error.message}。请等待服务器保存成功后再刷新。`;
+            return false;
+        }
+    }
+
+    function restoreEditorDraft() {
+        if (!pendingDraft || adminDirty) return false;
+        const list = document.getElementById('admin-list');
+        list.innerHTML = '';
+        for (const row of pendingDraft.rows) list.appendChild(createAdminRow(row, row.originalIndex === '' ? null : Number(row.originalIndex)));
+        editorBaseline = pendingDraft.baseline;
+        document.getElementById('maxVoteInput').value = pendingDraft.maxVotes;
+        document.getElementById('batch-group').value = pendingDraft.group || '';
+        adminDirty = true;
+        refreshLocalSuggestions();
+        setSaveStatus('已恢复上次未同步的草稿，请确认后点击“保存更新”。');
+        document.getElementById('local-draft-status').textContent = '本机草稿已恢复，图片仍保留。';
+        return true;
+    }
+
+    async function loadLocalState() {
+        try {
+            const [draft, cached] = await Promise.all([readLocalState('draft'), readLocalState('snapshot')]);
+            if (draft?.state === 'pending' && Array.isArray(draft.rows)) pendingDraft = draft;
+            if (cached && !dataLoaded) {
+                currentData = cached;
+                globalMaxVotes = cached.maxVotes || 1;
+                renderUserView(cached.items || []);
+                document.getElementById('sync-status').textContent = '先显示本机缓存的图片，正在连接服务器核对最新数据…';
+            }
+            if (pendingDraft) {
+                document.getElementById('local-draft-notice').hidden = false;
+                document.getElementById('local-draft-status').textContent = '发现未同步草稿，进入管理入口可恢复。';
+                if (isAdmin) restoreEditorDraft();
+            }
+        } catch (error) {
+            document.getElementById('local-draft-status').textContent = '本机草稿暂不可用，请等待服务器保存成功后再刷新。';
+        }
+    }
+
+    const localStateReady = loadLocalState();
 
     function metadataSignature(data) {
         return JSON.stringify({ round: data.round || 0, maxVotes: data.maxVotes || 1,
@@ -244,12 +355,15 @@
     document.getElementById('admin-list').addEventListener('input', markAdminDirty);
     document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
     window.addEventListener('beforeunload', event => {
-        if (adminDirty || saving || processingImages) { event.preventDefault(); event.returnValue = ''; }
+        if (adminDirty || saving || preparingSave || processingImages) { event.preventDefault(); event.returnValue = ''; }
     });
     db.ref('.info/connected').on('value', snapshot => {
         databaseConnected = snapshot.val() === true;
         if (!databaseConnected) setSaveStatus('连接已断开，编辑内容仍在当前页面。请等待连接恢复后保存。', 'error');
         else if (!adminDirty && !saving) setSaveStatus('已连接，可以编辑并保存。');
+        document.getElementById('sync-status').textContent = databaseConnected
+            ? (dataLoaded ? `已连接，已加载 ${(currentData.items || []).length} 张图片。` : '已连接，正在读取保存的图片，请稍候…')
+            : '正在连接服务器，已显示的图片为本机已有内容，请稍候…';
     });
 
     // --- 实时监听 ---
@@ -260,6 +374,8 @@
         globalMaxVotes = data.maxVotes || 1;
         checkRoundVersion(data.round || 0);
         renderUserView(data.items || []);
+        document.getElementById('sync-status').textContent = `已加载 ${(data.items || []).length} 张图片。`;
+        writeLocalState('snapshot', data).catch(() => {});
         
         // 如果弹窗开着，同步刷新弹窗里的按钮状态（防止别人投票影响当前状态）
         if (document.getElementById('modal').style.display === 'flex') {
@@ -268,13 +384,16 @@
         
         if (isAdmin) {
             updateDashboard(data);
-            if (!adminDirty && !saving && !processingImages) {
+            if (!adminDirty && !saving && !preparingSave && !processingImages) {
                 renderAdminView(data.items || []);
                 updateGroupSuggestions(data.items || []);
                 document.getElementById('maxVoteInput').value = globalMaxVotes;
             }
         }
-    }, error => setSaveStatus(`读取失败，暂不能保存：${error.message || error.code}`, 'error'));
+    }, error => {
+        setSaveStatus(`读取失败，暂不能保存：${error.message || error.code}`, 'error');
+        document.getElementById('sync-status').textContent = `图片读取失败：${error.message || error.code}。这不代表图片已删除，请稍后重新连接。`;
+    });
 
     function checkRoundVersion(serverRound) {
         const localRound = parseInt(localStorage.getItem('spark_vote_round') || '-1');
@@ -362,6 +481,7 @@
 
     // --- 投票核心逻辑 ---
     function toggleVote(index, groupName) {
+        if (!dataLoaded || !databaseConnected) return showToast('正在同步，请连接恢复后再投票', '⏳');
         let log = getLocalLog();
         if (!log[groupName]) log[groupName] = [];
         const isSelected = log[groupName].includes(index);
@@ -492,7 +612,8 @@
     });
 
     // --- 后台功能 (维持不变) ---
-    function toggleAdmin() {
+    async function toggleAdmin() {
+        await localStateReady;
         if (!isAdmin) {
             if (prompt("验证:") === "123456") { 
                 isAdmin = true; 
@@ -501,6 +622,7 @@
                 updateDashboard(currentData);
                 updateGroupSuggestions(currentData.items || []);
                 if (!adminDirty) document.getElementById('maxVoteInput').value = globalMaxVotes;
+                restoreEditorDraft();
             }
         } else { 
             isAdmin = false; 
@@ -556,7 +678,7 @@
         editorBaseline = metadataSignature(currentData);
     }
     function addNewRow() {
-        if (saving) return;
+        if (saving || preparingSave) return;
         document.getElementById('admin-list').appendChild(createAdminRow({}, null));
         markAdminDirty();
     }
@@ -577,14 +699,14 @@
         const zone = div.querySelector('.drop-zone');
         setImagePreview(zone, item.url || '');
         zone.addEventListener('click', event => {
-            if (saving || zone.dataset.processing || event.target.tagName === 'INPUT') return;
+            if (saving || preparingSave || zone.dataset.processing || event.target.tagName === 'INPUT') return;
             zone.querySelector('input[type="file"]').click();
         });
         zone.addEventListener('keydown', event => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); zone.click(); }
         });
         div.querySelector('.remove-row').addEventListener('click', () => {
-            if (saving || processingImages) return;
+            if (saving || preparingSave || processingImages) return;
             if (confirm('移除这个选项？保存更新后才会生效。')) { div.remove(); markAdminDirty(); }
         });
         return div;
@@ -628,10 +750,11 @@
     }
     function handleFileSelect(event, zone) { return handleRowFiles(Array.from(event.target.files), zone); }
     async function handleRowFiles(files, zone) {
-        if (!files.length || saving || processingImages) return;
+        if (!files.length || saving || preparingSave || processingImages) return;
         const group = zone.closest('.admin-item').querySelector('.edit-group').value.trim() || '默认分组';
-        await processFile(files[0], zone);
+        const ready = await processFile(files[0], zone);
         if (files.length > 1) await importImageFiles(files.slice(1), group);
+        else if (ready) await saveAll();
     }
     function handleBatchDrop(event) {
         event.preventDefault();
@@ -647,7 +770,7 @@
     async function importImageFiles(files, group) {
         if (!files.length) return;
         const status = document.getElementById('batch-status');
-        if (saving || processingImages || batchImporting) { status.textContent = '正在处理上一批图片或保存，请稍候再添加。'; return; }
+        if (saving || preparingSave || processingImages || batchImporting) { status.textContent = '正在处理上一批图片或保存，请稍候再添加。'; return; }
         group = group || document.getElementById('batch-group').value.trim() || '默认分组';
         batchImporting = true;
         processingImages++;
@@ -668,12 +791,13 @@
                     const name = file.name.replace(/\.[^.]+$/, '') || `图片 ${index + 1}`;
                     document.getElementById('admin-list').appendChild(createAdminRow({name, url, group}, null));
                     added++;
+                    await persistEditorDraft();
                 } catch (error) { failures.push(`${file.name}（${error.message}）`); }
                 progress.value = index + 1;
             }
             refreshLocalSuggestions();
             status.textContent = `已添加 ${added} 张图片${failures.length ? `，${failures.length} 个文件未添加：${failures.join('；')}` : ''}。`;
-            setSaveStatus(added ? `已添加 ${added} 个选项，请点击“保存更新”。` : '没有添加新图片，请查看批量导入提示。', added ? '' : 'error');
+            setSaveStatus(added ? `已添加 ${added} 个选项，正在自动保存…` : '没有添加新图片，请查看批量导入提示。', added ? '' : 'error');
         } finally {
             batchImporting = false;
             processingImages--;
@@ -681,10 +805,11 @@
             document.getElementById('batch-select-button').disabled = false;
             document.getElementById('save-button').disabled = saving || processingImages > 0;
         }
+        if (added) await saveAll();
     }
     
     async function processFile(file, zone) {
-        if (saving || zone.dataset.processing) return false;
+        if (saving || preparingSave || zone.dataset.processing) return false;
         processingImages++;
         zone.dataset.processing = 'true';
         zone.classList.add('processing');
@@ -695,7 +820,8 @@
             setImagePreview(zone, url);
             const name = zone.closest('.admin-item').querySelector('.edit-name');
             if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '') || '未命名图片';
-            setSaveStatus('图片已就绪，请点击“保存更新”。');
+            await persistEditorDraft();
+            setSaveStatus('图片已就绪，正在自动保存…');
             return true;
         } catch (error) {
             setSaveStatus(`${file.name}：${error.message}。原图片已保留。`, 'error');
@@ -738,9 +864,14 @@
     }
 
     async function saveAll() {
-        if (saving) return;
+        if (saving || preparingSave) return;
         if (processingImages) return setSaveStatus('图片正在处理，请稍候再保存。', 'error');
-        if (!dataLoaded || !databaseConnected) return setSaveStatus('尚未连接到服务器，内容仍保留在当前页面，请连接恢复后再保存。', 'error');
+        preparingSave = true;
+        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
+        await persistEditorDraft();
+        preparingSave = false;
+        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = false; });
+        if (!dataLoaded || !databaseConnected) return setSaveStatus('尚未连接到服务器，暂未同步；请查看本机草稿状态，连接恢复后再保存。', 'error');
         const rows = Array.from(document.querySelectorAll('#admin-list .admin-item'));
         const drafts = [];
         for (const [index, row] of rows.entries()) {
@@ -759,10 +890,13 @@
         setSaveStatus('正在保存，等待服务器确认…');
         const noticeTimer = setTimeout(() => setSaveStatus('服务器尚未确认，请保留当前页面，连接恢复后会继续保存。'), 15000);
         try {
+            const baselineRound = JSON.parse(editorBaseline).round;
+            const submittedSignature = metadataSignature({round:baselineRound,maxVotes,items:drafts});
             const result = await db.ref('sparkVote').transaction(server => {
                 const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
+                if (metadataSignature(latest) === submittedSignature) return latest;
                 if (metadataSignature(latest) !== editorBaseline) return;
-                const items = drafts.map(draft => ({ name: draft.name, group: draft.group, url: draft.url,
+                const items = drafts.map(draft => ({ ...(draft.originalIndex == null ? {} : latest.items?.[draft.originalIndex]), name: draft.name, group: draft.group, url: draft.url,
                     votes: draft.originalIndex == null ? 0 : (latest.items?.[draft.originalIndex]?.votes || 0) }));
                 return { ...latest, items, maxVotes };
             }, undefined, false);
@@ -771,9 +905,12 @@
             globalMaxVotes = currentData.maxVotes || 1;
             adminDirty = false;
             renderAdminView(currentData.items || []);
+            document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
             renderUserView(currentData.items || []);
             updateDashboard(currentData);
             refreshLocalSuggestions();
+            await persistEditorDraft('saved');
+            await writeLocalState('snapshot', currentData).catch(() => {});
             setSaveStatus(`保存成功，服务器已确认 ${drafts.length} 个选项，刷新页面后仍会保留。`, 'success');
         } catch (error) {
             setSaveStatus(`保存失败：${error.message || error.code}。编辑内容已保留，请勿关闭页面。`, 'error');

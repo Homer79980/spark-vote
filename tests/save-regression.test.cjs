@@ -109,3 +109,25 @@ test('offline save preserves the draft without issuing a write', async () => {
     assert.equal(app.writes.length,0);
     assert.match(app.elements.get('save-status').textContent,/尚未连接/);
 });
+
+test('double-click during local draft persistence sends only one server write', async () => {
+    const app = setup([row({name:'图片'})]);
+    await Promise.all([app.context.saveAll(),app.context.saveAll()]);
+    assert.equal(app.writes.length,1);
+});
+
+test('a recovered draft already committed remotely is recognized without resetting votes', async () => {
+    const app = setup([row({name:'图片'})]);
+    app.server.data = {items:[{name:'图片',group:'测试组',url:'data:image/jpeg;base64,AA==',votes:7}],round:0,maxVotes:1};
+    await app.context.saveAll();
+    assert.equal(app.writes.length,1);
+    assert.equal(app.writes[0].items[0].votes,7);
+    assert.match(app.elements.get('save-status').textContent,/保存成功/);
+});
+
+test('editing an existing item preserves additional server metadata', async () => {
+    const old = {name:'旧名称',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:3,assetId:'keep-me'};
+    const app = setup([row({name:'新名称',originalIndex:'0'})],{items:[old],round:0,maxVotes:1});
+    await app.context.saveAll();
+    assert.equal(app.writes[0].items[0].assetId,'keep-me');
+});

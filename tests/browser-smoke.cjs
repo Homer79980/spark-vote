@@ -19,7 +19,6 @@ async function main(){
         await page.getByRole('button',{name:'+ 新增',exact:true}).click();
         await page.locator('.drop-zone input[type=file]').setInputFiles(image);
         await page.waitForFunction(()=>document.querySelector('.edit-name').value==='透明示例');
-        await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
         await page.reload();
         assert.equal(await page.locator('.card').count(),1,'saved image must survive refresh');
@@ -42,6 +41,7 @@ async function main(){
         const selected=Array.from({length:12},(_,i)=>({...image,name:`方案${i+1}.png`}));
         await chooser.setFiles(selected);
         await page.waitForFunction(()=>document.querySelector('#batch-status').textContent.includes('已添加 12 张'));
+        await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
         assert.equal(await page.locator('.admin-item').count(),13);
         assert.equal(await page.locator('.edit-name').nth(1).inputValue(),'方案1');
         assert.equal(await page.locator('.edit-group').nth(12).inputValue(),'批量 A');
@@ -57,12 +57,12 @@ async function main(){
         await page.locator('#batch-upload').dispatchEvent('drop',{dataTransfer:dropped});
         await dropped.dispose();
         await page.waitForFunction(()=>document.querySelector('#batch-status').textContent.includes('已添加 2 张图片'));
+        await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
         assert.match(await page.locator('#batch-status').innerText(),/2 个文件未添加/);
         assert.equal(await page.locator('.admin-item').count(),15);
         await page.locator('.drop-zone input[type=file]').first().setInputFiles([{...image,name:'替换.png'},{...image,name:'附加.png'}]);
         await page.waitForFunction(()=>document.querySelectorAll('.admin-item').length===16);
         await page.waitForFunction(()=>!document.querySelector('#save-button').disabled);
-        await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('保存成功'));
         await page.reload();
         assert.equal(await page.locator('.card').count(),16,'all batch images must survive refresh');
