@@ -28,7 +28,7 @@ function setup(rows = [], initialData = {items:[],round:0,maxVotes:1}) {
         update(payload) { writes.push(payload); return Promise.resolve(); },
         transaction(fn) { if (server.error) return Promise.reject(server.error); const value = fn(server.data); if (value === undefined) return Promise.resolve({committed:false}); writes.push(value); server.data=value; return Promise.resolve({committed:true,snapshot:{val:()=>value}}); }
     }; } };
-    const context = vm.createContext({ document, console, Blob, TextEncoder, URL, Promise,
+    const context = vm.createContext({ document, console, Blob, TextEncoder, URL, Promise, SparkNumbers: require('../number-voting.js'),
         firebase: { initializeApp() {}, database: () => db },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         window: { addEventListener() {} }, setTimeout: () => 1, clearTimeout() {},
@@ -130,4 +130,32 @@ test('editing an existing item preserves additional server metadata', async () =
     const app = setup([row({name:'新名称',originalIndex:'0'})],{items:[old],round:0,maxVotes:1});
     await app.context.saveAll();
     assert.equal(app.writes[0].items[0].assetId,'keep-me');
+});
+
+test('saving image edits keeps numbered ballots that arrived while editing', async () => {
+    const old = {name:'24_2301-2400',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:3};
+    const app = setup([row({name:'24_2301-2400',originalIndex:'0',group:'新组'})],{items:[old],round:0,maxVotes:1});
+    app.server.data.numberBallots = {r0:{voter:{n2358:true}},r1:{archived:{n2301:true}}};
+    await app.context.saveAll();
+    assert.equal(app.writes[0].numberBallots.r0.voter.n2358,true);
+    assert.equal(app.writes[0].numberBallots.r1.archived.n2301,true);
+    assert.equal(app.writes[0].items[0].votes,3);
+});
+
+test('overlapping numbered uploads fail validation without replacing server items', async () => {
+    const app=setup([row({name:'23_2201-2300'}),row({name:'24_2250-2350'})]);
+    await app.context.saveAll();
+    assert.equal(app.writes.length,0);
+    assert.match(app.elements.get('save-status').textContent,/重叠/);
+});
+
+test('number CSV excludes earlier rounds, preserves legacy votes, and escapes spreadsheet formulas', () => {
+    const app=setup([],{items:[{name:'24_2301-2400',url:'x',group:'=SUM(1,2)',votes:3}],round:1,
+        numberBallots:{r0:{old:{n2301:true}},r1:{one:{n2358:true}}}});
+    const csv=app.context.buildExportCsv();
+    assert.match(csv,/"2358","1"/);
+    assert.match(csv,/"2301","0"/);
+    assert.match(csv,/"'=SUM\(1,2\)"/);
+    assert.match(csv,/原整图投票记录/);
+    assert.match(csv,/"24_2301-2400","3"/);
 });

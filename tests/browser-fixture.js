@@ -6,10 +6,28 @@
     const listeners = {};
     const snapshot = value => ({val:()=>structuredClone(value)});
     const publish = () => {localStorage.setItem(key,JSON.stringify(server)); listeners.sparkVote?.(snapshot(server));};
+    window.addEventListener('storage', event => {
+        if (event.key === key && event.newValue) { server=JSON.parse(event.newValue); listeners.sparkVote?.(snapshot(server)); }
+    });
     window.firebase = {initializeApp(){},database:()=>({ref(path){return {
         on(event,fn){listeners[path]=fn;if(path === '.info/connected' || connected)queueMicrotask(()=>fn(snapshot(path === '.info/connected' ? connected : server)));},
         async transaction(update){
             if (rejectNext) {rejectNext=false;throw new Error('PERMISSION_DENIED (test)');}
+            if(path.startsWith('sparkVote/numberBallots/')) {
+                return navigator.locks.request('spark-number-test-server',async () => {
+                    const delay = Number(new URLSearchParams(location.search).get('voteDelay')) || 0;
+                    if (delay) await new Promise(resolve => setTimeout(resolve,delay));
+                    server = JSON.parse(localStorage.getItem(key) || 'null') || server;
+                    const [, , round, voter] = path.split('/');
+                    const latest = server.numberBallots?.[round]?.[voter] || null;
+                    const next = update(structuredClone(latest));
+                    if (next===undefined) { listeners.sparkVote?.(snapshot(server)); return {committed:false,snapshot:snapshot(latest)}; }
+                    server.numberBallots ||= {};
+                    server.numberBallots[round] ||= {};
+                    server.numberBallots[round][voter] = next;
+                    publish();return {committed:true,snapshot:snapshot(next)};
+                });
+            }
             if(path === 'sparkVote') {
                 const next=update(structuredClone(server));
                 if(next===undefined) return {committed:false,snapshot:snapshot(server)};

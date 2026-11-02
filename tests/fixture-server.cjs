@@ -10,6 +10,10 @@ function startServer(port = 0) {
                 res.setHeader('Content-Type','text/javascript; charset=utf-8');
                 res.end(fs.readFileSync(path.join(__dirname,'browser-fixture.js')));return;
             }
+            if(req.url.split('?')[0] === '/number-voting.js') {
+                res.setHeader('Content-Type','text/javascript; charset=utf-8');
+                res.end(fs.readFileSync(path.join(__dirname,'..','number-voting.js')));return;
+            }
             res.setHeader('Content-Type','text/html; charset=utf-8');
             const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8')
                 .replace(/<script src="https:\/\/www.gstatic.com\/firebasejs\/[^\"]+"><\/script>/g,'');

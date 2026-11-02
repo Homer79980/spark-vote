@@ -98,6 +98,32 @@
         .batch-actions button { border: 0; border-radius: 4px; padding: 10px 16px; background: var(--spark-blue); color: white; cursor: pointer; }
         #batch-progress { width: 100%; margin-top: 10px; }
         #batch-status { overflow-wrap: anywhere; }
+        .number-panel { background: white; padding: 18px; border-radius: 8px; margin-bottom: 24px; }
+        .number-panel h3 { margin: 0 0 8px; }
+        .number-rule { font-size: 14px; line-height: 1.6; margin: 6px 0; }
+        .number-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+        .number-form input { width: 130px; min-width: 0; padding: 9px; border: 1px solid #aaa; border-radius: 5px; font: inherit; }
+        .number-form button, .number-chip button { padding: 9px 12px; border: 1px solid #0984e3; border-radius: 5px; background: #0984e3; color: white; cursor: pointer; }
+        .number-form .secondary { background: white; color: #0984e3; }
+        .number-selection { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+        .number-chip { display: inline-flex; border-radius: 5px; background: #edf6ff; }
+        .number-chip button { color: #0868ab; background: transparent; border: 0; }
+        .number-chip .number-cancel { color: #a93226; }
+        .number-ranking { margin-top: 12px; }
+        .number-ranking summary { cursor: pointer; }
+        .number-ranking-scroll { max-height: 320px; overflow: auto; margin-top: 10px; }
+        .number-ranking table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .number-ranking th, .number-ranking td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
+        .number-ranking button { border: 0; color: #0877bd; background: none; cursor: pointer; }
+        .number-status { font-size: 13px; line-height: 1.5; margin: 6px 0; overflow-wrap: anywhere; }
+        .number-status.error { color: #bf3328; }
+        .number-status.success { color: #00856b; }
+        .number-legacy { color: #777; font-size: 12px; }
+        #modalNumberVoting { color: white; max-width: 100%; }
+        #modalNumberVoting .number-rule { font-size: 12px; }
+        #modalNumberVoting .number-status { max-width: 520px; max-height: 40px; overflow: auto; }
+        #modalNumberVoting .number-status.error { color: #ffb1a8; }
+        #modalNumberVoting .number-status.success { color: #81e6c2; }
         @media (max-width: 600px) {
             body { padding: 12px; }
             #admin-panel { padding: 14px; }
@@ -161,23 +187,24 @@
     <div id="admin-panel">
         <h3 style="margin-top:0">📊 数据看板</h3>
         <div class="stats-dashboard">
-            <div class="stat-card"><span class="stat-num" id="stat-headcount">0</span><span class="stat-label">👥 参与人数</span></div>
-            <div class="stat-card"><span class="stat-num" id="stat-totalvotes">0</span><span class="stat-label">🎫 累计票数</span></div>
-            <div class="stat-card"><span class="stat-num" id="stat-topgroup">-</span><span class="stat-label">🔥 最热分组</span></div>
+            <div class="stat-card"><span class="stat-num" id="stat-headcount">0</span><span class="stat-label" id="stat-headcount-label">👥 参与人数</span></div>
+            <div class="stat-card"><span class="stat-num" id="stat-totalvotes">0</span><span class="stat-label" id="stat-totalvotes-label">🎫 累计票数</span></div>
+            <div class="stat-card"><span class="stat-num" id="stat-topgroup">-</span><span class="stat-label" id="stat-topgroup-label">🔥 最热分组</span></div>
         </div>
 
         <h3 style="margin-top:0">🛠 选项管理</h3>
         <div class="config-bar">
-            <span>⚙️ <b>规则：</b>每组每人限投</span>
+            <span>⚙️ <b>普通单图规则：</b>每组每人限投</span>
             <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;">
             <span>票</span>
         </div>
+        <p class="number-rule">编号总览图：所有图片合计，每人最多选择 <b>20 个不同编号</b>，每个编号一票。</p>
         <datalist id="group-suggestions"></datalist>
         <section id="batch-upload" class="batch-upload" aria-label="批量添加图片"
             ondragover="event.preventDefault(); this.classList.add('drag-over')"
             ondragleave="this.classList.remove('drag-over')" ondrop="handleBatchDrop(event)">
             <h4>📷 批量添加图片</h4>
-            <p>把多张图片一起拖到这里，或点击按钮多选。每张图自动生成一个选项，名称使用文件名。</p>
+            <p>把多张图片一起拖到这里，或点击按钮多选。名称使用文件名；总览图请保留编号范围，例如 24_2301-2400，可自动开启编号投票。</p>
             <div class="batch-actions">
                 <label for="batch-group">统一分组</label>
                 <input id="batch-group" list="group-suggestions" placeholder="默认分组（可修改）">
@@ -204,6 +231,25 @@
 
     <p id="sync-status" class="save-status" role="status" aria-live="polite">正在加载已保存的图片，连接较慢时请稍候…</p>
     <p id="local-draft-notice" class="save-status" role="status" hidden>发现尚未同步的图片草稿，请进入管理入口继续保存。</p>
+    <section id="number-vote-panel" class="number-panel" hidden aria-label="按编号投票">
+        <h3>按编号选择喜欢的方案</h3>
+        <p class="number-rule">所有总览图合计最多选 <b>20 个不同编号</b>，每个编号一票，可撤销后重新选择。</p>
+        <form class="number-form" onsubmit="event.preventDefault(); submitNumberVote('number-vote-input')">
+            <label for="number-vote-input">方案编号</label>
+            <input id="number-vote-input" type="text" inputmode="numeric" maxlength="7" placeholder="例如 2358" autocomplete="off" required>
+            <button type="button" class="secondary" onclick="locateNumberInput()">查看所在图</button>
+            <button type="submit" data-number-submit>投给此编号</button>
+        </form>
+        <p id="number-vote-status" class="number-status" role="status" aria-live="polite"></p>
+        <p id="number-vote-quota" class="number-rule"></p>
+        <div id="number-my-selections" class="number-selection" aria-label="我已投的编号"></div>
+        <p class="number-legacy">免登录投票，使用同一浏览器可恢复已投记录；更换设备不会同步个人选择。</p>
+        <details class="number-ranking">
+            <summary id="number-ranking-summary">编号票数排行</summary>
+            <div class="number-ranking-scroll"><table><thead><tr><th>编号</th><th>票数</th><th>所在总览图</th></tr></thead><tbody id="number-ranking-body"></tbody></table></div>
+        </details>
+        <p id="number-legacy-summary" class="number-legacy"></p>
+    </section>
     <div id="voteContainer"></div>
     <div class="footer" onclick="toggleAdmin()">Spark Studio Internal | 管理入口</div>
 </div>
@@ -225,6 +271,15 @@
             </div>
             <span class="modal-zoom-hint">滚轮缩放 · 放大后拖动查看</span>
             <span id="modalItemName">项目名称</span>
+            <div id="modalNumberVoting" hidden>
+                <p id="modal-number-range" class="number-rule"></p>
+                <form class="number-form" onsubmit="event.preventDefault(); submitNumberVote('modal-number-input')">
+                    <label for="modal-number-input">编号</label>
+                    <input id="modal-number-input" type="text" inputmode="numeric" maxlength="7" placeholder="输入图中编号" autocomplete="off" required>
+                    <button type="submit" data-number-submit>投给此编号</button>
+                </form>
+                <p id="modal-number-status" class="number-status" role="status" aria-live="polite"></p>
+            </div>
             <button id="modalVoteBtn" onclick="modalToggleVote(event)">👍 投一票</button>
         </div>
     </div>
@@ -232,6 +287,7 @@
     <button class="modal-nav next" onclick="nextImage(event)">&#10095;</button>
 </div>
 
+<script src="number-voting.js?v=20261102-1"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
 <script>
@@ -259,6 +315,8 @@
     let localWriteChain = Promise.resolve();
     let pendingDraft = null;
     let draftRevision = 0;
+    let numberSubmitting = false;
+    let numberVoteMessage = '', numberVoteMessageKind = '';
 
     function setSaveStatus(message, kind = '') {
         for (const id of ['save-status', 'upload-save-status']) {
@@ -385,7 +443,7 @@
     document.getElementById('admin-list').addEventListener('input', markAdminDirty);
     document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
     window.addEventListener('beforeunload', event => {
-        if (adminDirty || saving || preparingSave || processingImages) { event.preventDefault(); event.returnValue = ''; }
+        if (adminDirty || saving || preparingSave || processingImages || numberSubmitting) { event.preventDefault(); event.returnValue = ''; }
     });
     db.ref('.info/connected').on('value', snapshot => {
         databaseConnected = snapshot.val() === true;
@@ -394,6 +452,7 @@
         document.getElementById('sync-status').textContent = databaseConnected
             ? (dataLoaded ? `已连接，已加载 ${(currentData.items || []).length} 张图片。` : '已连接，正在读取保存的图片，请稍候…')
             : '正在连接服务器，已显示的图片为本机已有内容，请稍候…';
+        renderNumberVoting();
     });
 
     // --- 实时监听 ---
@@ -436,8 +495,127 @@
     
     function getLocalLog() { return JSON.parse(localStorage.getItem('spark_voted_log') || '{}'); }
 
+    function numberRoundKey() { return `r${currentData.round || 0}`; }
+    function numberBallots() { return currentData.numberBallots?.[numberRoundKey()] || {}; }
+    function numberVoterId(create = false) {
+        try {
+            let id = localStorage.getItem('spark_number_voter_v1');
+            if (!/^[a-f0-9-]{36}$/.test(id || '')) {
+                if (!create) return '';
+                id = crypto.randomUUID();
+                localStorage.setItem('spark_number_voter_v1', id);
+                if (localStorage.getItem('spark_number_voter_v1') !== id) throw new Error('无法保留投票身份');
+            }
+            return id;
+        } catch (error) {
+            if (create) throw new Error('浏览器无法保存投票身份，请允许网站存储后再投票。');
+            return '';
+        }
+    }
+    function myNumberChoices() { return SparkNumbers.choices(numberBallots()[numberVoterId()]); }
+    function setNumberVoteStatus(message, kind = '', remember = true) {
+        if (remember) { numberVoteMessage = message; numberVoteMessageKind = kind; }
+        for (const id of ['number-vote-status', 'modal-number-status']) {
+            const element = document.getElementById(id);
+            element.textContent = message;
+            element.className = `number-status ${kind}`;
+        }
+    }
+    function renderNumberVoting() {
+        const items = currentData.items || [];
+        const enabled = items.some(item => SparkNumbers.range(item.name)) || Object.keys(numberBallots()).length > 0;
+        document.getElementById('number-vote-panel').hidden = !enabled;
+        const mine = myNumberChoices();
+        const summary = SparkNumbers.summarize(numberBallots());
+        document.getElementById('number-vote-quota').textContent = `我已选 ${mine.length} / 20 个编号，还可选 ${Math.max(0, 20 - mine.length)} 个。`;
+        document.getElementById('number-my-selections').innerHTML = mine.length ? mine.map(number =>
+            `<span class="number-chip"><button type="button" onclick="locateNumber(${number})" aria-label="查看 ${number} 号">${number}</button><button type="button" class="number-cancel" data-number-cancel="${number}" onclick="cancelNumberVote(${number})" aria-label="撤销 ${number} 号">×</button></span>`).join('') : '<span class="number-legacy">尚未选择编号</span>';
+        document.getElementById('number-ranking-summary').textContent = `编号票数排行 · ${summary.participants} 人已选 · 共 ${summary.total} 票`;
+        document.getElementById('number-ranking-body').innerHTML = summary.ranking.length ? summary.ranking.map(({number, votes}) => {
+            const match = SparkNumbers.find(items, number);
+            return `<tr data-number="${number}"><td>${number}</td><td>${votes}</td><td>${match.error ? '总览图待核对' : `<button type="button" onclick="locateNumber(${number})">${escapeHtml(match.item.name)}</button>`}</td></tr>`;
+        }).join('') : '<tr><td colspan="3">暂无编号投票</td></tr>';
+        const legacyVotes = items.filter(item => SparkNumbers.range(item.name)).reduce((sum, item) => sum + (item.votes || 0), 0);
+        document.getElementById('number-legacy-summary').textContent = legacyVotes ? `原整张总览图的 ${legacyVotes} 票单独保留，不计入编号排行。` : '';
+        const range = SparkNumbers.range(items[currentModalIndex]?.name);
+        document.getElementById('modalNumberVoting').hidden = !range;
+        document.getElementById('modalVoteBtn').hidden = !!range;
+        document.getElementById('modal-number-range').textContent = range ? `本图 ${range.start}–${range.end} 号 · 已选 ${mine.length}/20` : '';
+        document.querySelectorAll('[data-number-submit], [data-number-cancel]').forEach(button => {
+            button.disabled = numberSubmitting || !dataLoaded || !databaseConnected;
+        });
+        setNumberVoteStatus(numberVoteMessage || (dataLoaded && databaseConnected ? '输入编号并确认后，等待服务器保存成功。' : '正在连接服务器，请稍候再投票。'), numberVoteMessageKind, false);
+    }
+    function locateNumber(value) {
+        const match = SparkNumbers.find(currentData.items, value);
+        if (match.error) return setNumberVoteStatus(match.error, 'error');
+        openModal(match.index);
+        document.getElementById('modal-number-input').value = match.number;
+    }
+    function locateNumberInput() { locateNumber(document.getElementById('number-vote-input').value); }
+    async function submitNumberVote(inputId) {
+        if (numberSubmitting) return;
+        const match = SparkNumbers.find(currentData.items, document.getElementById(inputId).value);
+        if (match.error) return setNumberVoteStatus(match.error, 'error');
+        if (inputId === 'modal-number-input' && match.index !== currentModalIndex) return setNumberVoteStatus('此编号属于另一张总览图，请在首页输入编号查看对应图片。', 'error');
+        if (myNumberChoices().includes(match.number)) return setNumberVoteStatus(`您已投过 ${match.number} 号，每个编号只能投一票。`, 'error');
+        if (myNumberChoices().length >= SparkNumbers.LIMIT) return setNumberVoteStatus('已选满 20 个编号，请先在“我已投的编号”中撤销一个。', 'error');
+        if (!dataLoaded || !databaseConnected) return setNumberVoteStatus('尚未连接服务器，请连接恢复后再投票。', 'error');
+        if (!confirm(`确定投给 ${match.number} 号？\n所在总览图：${match.item.name}\n所有图片合计最多选择 20 个不同编号。`)) return;
+        await saveNumberChoice(match.number, true);
+    }
+    async function cancelNumberVote(number) {
+        if (numberSubmitting || !myNumberChoices().includes(number)) return;
+        if (!confirm(`撤销 ${number} 号的投票？撤销后可重新选择其他编号。`)) return;
+        await saveNumberChoice(number, false);
+    }
+    async function saveNumberChoice(number, selected) {
+        if (numberSubmitting) return;
+        if (!dataLoaded || !databaseConnected) return setNumberVoteStatus('尚未连接服务器，请连接恢复后重试。', 'error');
+        numberSubmitting = true;
+        let voter;
+        try {
+            voter = navigator.locks ? await navigator.locks.request('spark-number-voter-identity', () => numberVoterId(true)) : numberVoterId(true);
+        } catch (error) {
+            numberSubmitting = false;
+            return setNumberVoteStatus(error.message, 'error');
+        }
+        const round = numberRoundKey();
+        setNumberVoteStatus(`正在${selected ? '保存' : '撤销'} ${number} 号，等待服务器确认…`);
+        renderNumberVoting();
+        const timer = setTimeout(() => setNumberVoteStatus('服务器尚未确认，请保留页面，连接恢复后会继续处理。'), 15000);
+        let aborted = '';
+        try {
+            const result = await db.ref(`sparkVote/numberBallots/${round}/${voter}`).transaction(ballot => {
+                if (numberRoundKey() !== round) { aborted = '投票轮次已更新，请核对后重新选择。'; return; }
+                if (selected && SparkNumbers.find(currentData.items, number).error) { aborted = '编号范围已变化，请核对后重新选择。'; return; }
+                const next = SparkNumbers.change(ballot, number, selected);
+                if (next === undefined) aborted = '已选满 20 个编号（含其他标签页的选择），请先撤销一个。';
+                return next;
+            }, undefined, false);
+            if (!result.committed) throw new Error(aborted || '服务器未保存，请重试。');
+            if (numberRoundKey() !== round) throw new Error('投票轮次已更新，本次操作属于上一轮，请重新选择。');
+            currentData.numberBallots = currentData.numberBallots || {};
+            currentData.numberBallots[round] = currentData.numberBallots[round] || {};
+            currentData.numberBallots[round][voter] = result.snapshot.val() || {};
+            setNumberVoteStatus(`${number} 号${selected ? '投票成功' : '已撤销'}，服务器已确认。`, 'success');
+        } catch (error) {
+            setNumberVoteStatus(`操作未成功：${error.message || error.code}。请核对已投列表后重试。`, 'error');
+        } finally {
+            clearTimeout(timer);
+            numberSubmitting = false;
+            renderUserView(currentData.items || []);
+            if (document.getElementById('modal').style.display === 'flex') updateModalUI();
+            if (isAdmin) updateDashboard(currentData);
+        }
+    }
+    window.addEventListener('storage', event => {
+        if (event.key === 'spark_number_voter_v1') renderNumberVoting();
+    });
+
     // --- 渲染前台视图 ---
     function renderUserView(items) {
+        renderNumberVoting();
         const container = document.getElementById('voteContainer');
         container.innerHTML = '';
         const totalVotes = items.reduce((sum, item) => sum + (item.votes || 0), 0);
@@ -466,13 +644,15 @@
                 const statusHtml = isFull 
                     ? `<span class="group-status voted">✅ 已完成</span>` 
                     : `<span class="group-status">剩余 ${votesLeft} 票</span>`;
-                section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${escapeHtml(groupName)}</span> ${statusHtml}</h2>`;
+                const groupStatus = groupedItems[groupName].every(item => SparkNumbers.range(item.name)) ? '<span class="group-status">编号共用 20 个名额</span>' : statusHtml;
+                section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${escapeHtml(groupName)}</span> ${groupStatus}</h2>`;
             }
 
             const grid = document.createElement('div');
             grid.className = 'vote-grid';
 
             groupedItems[groupName].forEach(item => {
+                const numberRange = SparkNumbers.range(item.name);
                 const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
                 const isSelected = groupLog.includes(item.originalIndex);
                 let btnClass = "vote-action-btn";
@@ -495,10 +675,9 @@
                     <div class="card-body">
                         <div>
                             <span class="card-name">${escapeHtml(item.name || '未命名')}</span>
-                            <div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div>
-                            <div class="stats">${item.votes || 0} 票 (${percent}%)</div>
+                            ${numberRange ? `<div class="stats">编号 ${numberRange.start}–${numberRange.end}</div>` : `<div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div><div class="stats">${item.votes || 0} 票 (${percent}%)</div>`}
                         </div>
-                        <button class="${btnClass}" ${clickAction} ${btnStyle}>${btnText}</button>
+                        ${numberRange ? `<button class="vote-action-btn" onclick="openModal(${item.originalIndex})">查看图片 / 按编号投票</button>` : `<button class="${btnClass}" ${clickAction} ${btnStyle}>${btnText}</button>`}
                     </div>
                 `;
                 grid.appendChild(card);
@@ -511,6 +690,7 @@
 
     // --- 投票核心逻辑 ---
     function toggleVote(index, groupName) {
+        if (SparkNumbers.range(currentData.items?.[index]?.name)) return openModal(index);
         if (!dataLoaded || !databaseConnected) return showToast('正在同步，请连接恢复后再投票', '⏳');
         let log = getLocalLog();
         if (!log[groupName]) log[groupName] = [];
@@ -624,6 +804,7 @@
 
     function openModal(index) { 
         currentModalIndex = parseInt(index);
+        document.getElementById('modal-number-input').value = '';
         document.getElementById('modal').style.display = 'flex'; 
         updateModalUI();
         resetModalZoom();
@@ -641,6 +822,10 @@
         if (image.getAttribute('src') !== url) { image.src = url; resetModalZoom(); }
         image.alt = item.name || '图片预览';
         document.getElementById('modalItemName').innerText = item.name || '未命名';
+        const numberInput = document.getElementById('modal-number-input');
+        if (numberInput.dataset.sheet !== String(currentModalIndex)) { numberInput.value = ''; numberInput.dataset.sheet = String(currentModalIndex); }
+        renderNumberVoting();
+        if (SparkNumbers.range(item.name)) return;
 
         // 刷新弹窗内的投票按钮状态
         const groupName = item.group || '默认分组';
@@ -698,6 +883,7 @@
         if(e) e.stopPropagation();
         const item = currentData.items[currentModalIndex];
         if(!item) return;
+        if (SparkNumbers.range(item.name)) return submitNumberVote('modal-number-input');
         
         const groupName = item.group || '默认分组';
         const log = getLocalLog();
@@ -717,6 +903,7 @@
     // 监听键盘方向键，实现快捷翻页
     document.addEventListener('keydown', function(e) {
         if (document.getElementById('modal').style.display === 'flex') {
+            if (e.key !== 'Escape' && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
             if (e.key === 'ArrowLeft') prevImage();
             if (e.key === 'ArrowRight') nextImage();
             if (e.key === 'Escape') closeModal({target: document.getElementById('modal')});
@@ -744,6 +931,17 @@
 
     function updateDashboard(data) {
         const items = data.items || [];
+        const numbered = items.some(item => SparkNumbers.range(item.name));
+        document.getElementById('stat-headcount-label').textContent = numbered ? '👥 编号参与人数' : '👥 参与人数';
+        document.getElementById('stat-totalvotes-label').textContent = numbered ? '🎫 编号总票数' : '🎫 累计票数';
+        document.getElementById('stat-topgroup-label').textContent = numbered ? '🔥 得票最多的编号' : '🔥 最热分组';
+        if (numbered) {
+            const stats = SparkNumbers.summarize(data.numberBallots?.[`r${data.round || 0}`]);
+            document.getElementById('stat-headcount').innerText = stats.participants;
+            document.getElementById('stat-totalvotes').innerText = stats.total;
+            document.getElementById('stat-topgroup').innerText = stats.ranking[0]?.number || '-';
+            return;
+        }
         document.getElementById('stat-headcount').innerText = data.headcount || 0;
         const total = items.reduce((sum, item) => sum + (item.votes || 0), 0);
         document.getElementById('stat-totalvotes').innerText = total;
@@ -831,13 +1029,37 @@
         if (url) { const image = document.createElement('img'); image.src = url; image.className = 'preview-thumb'; image.alt = '图片预览'; preview.appendChild(image); }
     }
 
-    function exportData() {
+    function csvCell(value) {
+        let text = String(value ?? '');
+        if (/^[=+@\-\t\r]/.test(text)) text = "'" + text;
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    function buildExportCsv() {
         const items = currentData.items || [];
-        if (items.length === 0) return alert("暂无数据");
+        if (items.some(item => SparkNumbers.range(item.name)) || Object.keys(numberBallots()).length) {
+            const summary = SparkNumbers.summarize(numberBallots());
+            const allNumbers = new Set(summary.counts.keys());
+            for (const item of items) {
+                const range = SparkNumbers.range(item.name);
+                if (range) for (let number = range.start; number <= range.end; number++) allNumbers.add(number);
+            }
+            const rows = [['编号参与人数', summary.participants], ['每人最多选择', 20], ['编号', '票数', '总览图', '分组']];
+            for (const number of [...allNumbers].sort((a, b) => (summary.counts.get(b) || 0) - (summary.counts.get(a) || 0) || a - b)) {
+                const match = SparkNumbers.find(items, number);
+                rows.push([number, summary.counts.get(number) || 0, match.error ? '总览图待核对' : match.item.name, match.error ? '' : match.item.group || '默认分组']);
+            }
+            rows.push([], ['原整图投票记录（单独保留，不计入编号票数）'], ['分组', '名称', '票数']);
+            for (const item of items) rows.push([item.group || '默认分组', item.name || '未命名', item.votes || 0]);
+            return '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+        }
         let csv = `\uFEFF参与总人数: ${currentData.headcount || 0}\n分组,名称,票数\n`;
         [...items].sort((a,b)=>(a.group||"").localeCompare(b.group||"")||(b.votes-a.votes)).forEach(i=>{ csv += `${(i.group||"默认").replace(/,/g,"，")},${(i.name||"未命名").replace(/,/g,"，")},${i.votes||0}\n`; });
+        return csv;
+    }
+    function exportData() {
+        if (!(currentData.items || []).length && !Object.keys(numberBallots()).length) return alert("暂无数据");
         const link = document.createElement("a");
-        link.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8;'}));
+        link.href = URL.createObjectURL(new Blob([buildExportCsv()], {type:'text/csv;charset=utf-8;'}));
         link.download = `Spark投票数据_${new Date().toISOString().slice(0,10)}.csv`;
         link.click();
     }
@@ -995,6 +1217,8 @@
                 originalIndex: originalIndex === '' || originalIndex == null ? null : Number(originalIndex) });
         }
         const maxVotes = Number(document.getElementById('maxVoteInput').value);
+        const overlapping = SparkNumbers.overlap(drafts);
+        if (overlapping) return setSaveStatus(`${overlapping}，请修正名称后保存。编辑内容已保留。`, 'error');
         if (!Number.isInteger(maxVotes) || maxVotes < 1 || maxVotes > 99) return setSaveStatus('每组限投票数须为 1 至 99 的整数。', 'error');
         if (new TextEncoder().encode(JSON.stringify(drafts)).length > 15 * 1024 * 1024) return setSaveStatus('图片总量超过单次保存容量，请缩小图片后再保存。编辑内容已保留。', 'error');
         saving = true;
