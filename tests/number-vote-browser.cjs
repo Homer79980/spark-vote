@@ -57,16 +57,16 @@ async function main() {
         await page.locator('#modalNumberVoting [data-number-submit]').click();
         assert.match(await page.locator('#modal-number-status').innerText(),/等待服务器确认/);
         assert.match(await quota(),/1 \/ 50/,'unconfirmed vote does not appear as saved');
-        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('2358 号 × 2'));
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('投票成功'));
         assert.equal(await page.locator('#modalZoomValue').innerText(),'125%');
         assert.match(await quota(),/2 \/ 50/);
         assert.equal((await ballot()).n2358,2);
         await page.locator('#modalNumberVoting [data-number-submit]').click();
-        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('2358 号 × 3'));
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('投票成功'));
         assert.equal(await page.locator('[data-number-chip="2358"]').count(),1,'repeat votes share one numbered row');
         await page.locator('#modal-number-input').fill('1,2，2358、1');
         await page.locator('#modalNumberVoting [data-number-submit]').click();
-        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('本次 +4 票'));
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('已保存 4 票'));
         assert.match(await quota(),/7 \/ 50/);
         assert.deepEqual(await ballot(),{n2358:4,_format:2,n1:2,n2:1});
         assert.deepEqual(dialogs,[],'single and batch voting must never open dialogs');
@@ -89,10 +89,12 @@ async function main() {
         await vote('1,2');
         assert.match(await quota(),/9 \/ 50/);
         assert.deepEqual(dialogs,[],'submitting numbered votes must never open a dialog');
+        assert.equal(await page.locator('[data-number-cancel="2358"]').innerText(),'撤销');
         await page.locator('[data-number-cancel="2358"]').click();
-        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销 1 票'));
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销'));
         assert.match(await quota(),/8 \/ 50/);
         assert.equal((await ballot()).n2358,3,'cancel decrements one vote');
+        assert.deepEqual(dialogs,[],'cancel must not open a dialog');
         await page.locator('#number-vote-input').fill(Array(43).fill('1').join(','));
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/本次需 43 票，还剩 42 票/);
@@ -116,7 +118,7 @@ async function main() {
         assert.match(await page.locator('#number-vote-status').innerText(),/还剩 0 票/);
         for(let count=0;count<2;count++) {
             await page.locator('[data-number-cancel="2"]').click();
-            await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销 1 票'));
+            await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销'));
         }
         assert.equal(await page.locator('[data-number-chip="2"]').count(),0);
         await vote('2,2');
@@ -161,6 +163,17 @@ async function main() {
             if(screenshots) await page.screenshot({path:path.join(screenshots,`number-${viewport.width}.png`)});
         }
         await page.keyboard.press('Escape');
+        const otherVoter = '22222222-2222-4222-8222-222222222222';
+        await page.evaluate(other => {
+            const key='spark-vote-browser-test', data=JSON.parse(localStorage.getItem(key));
+            data.numberBallotsV2.r0[other]={_format:2,n2400:3};
+            localStorage.setItem(key,JSON.stringify(data));
+        },otherVoter);
+        await page.reload({waitUntil:'domcontentloaded'});
+        await page.waitForFunction(()=>dataLoaded);
+        assert.equal(await page.locator('[data-number-cancel="2400"]').count(),0,'other voters do not get a cancel control');
+        await page.evaluate(()=>cancelNumberVote(2400));
+        assert.equal(await page.evaluate(other=>JSON.parse(localStorage.getItem('spark-vote-browser-test')).numberBallotsV2.r0[other].n2400,otherVoter),3,'cannot cancel another browser ballot through normal UI');
         await page.getByRole('button',{name:'切换网络状态'}).click();
         assert.ok(await page.locator('#number-vote-panel [data-number-submit]').isDisabled());
         assert.deepEqual(errors,[]);
