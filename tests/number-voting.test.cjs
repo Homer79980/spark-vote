@@ -17,30 +17,54 @@ test('overlapping images cannot silently receive the wrong vote', () => {
     assert.match(numbers.find(duplicate,2358).error,/多张/);
     assert.equal(numbers.overlap(items),'');
 });
-test('all sheets share 20 distinct choices; retry is idempotent and cancellation frees one place', () => {
+test('repeated numbers consume a shared 50-vote budget and cancellation restores one vote', () => {
     let ballot = {};
-    for (let n=1;n<=20;n++) ballot=numbers.change(ballot,n,true);
-    assert.equal(numbers.choices(ballot).length,20);
-    assert.equal(numbers.change(ballot,2358,true),undefined);
-    assert.deepEqual(numbers.change(ballot,20,true),ballot);
-    const cancelled = numbers.change(ballot,7,false);
-    assert.equal(numbers.choices(cancelled).length,19);
-    const replacement = numbers.change(cancelled,2358,true);
-    assert.equal(numbers.choices(replacement).length,20);
-    assert.equal(replacement.n2358,true);
-    assert.equal(ballot.n7,true,'transaction input must not mutate');
-    assert.deepEqual(numbers.change(cancelled,7,false),cancelled);
-    assert.deepEqual(numbers.change(null,1,false),{});
+    for (let n=1;n<=50;n++) ballot=numbers.applyVotes(ballot,[2358]);
+    assert.equal(numbers.totalVotes(ballot),50);
+    assert.deepEqual(numbers.choices(ballot),[2358]);
+    assert.equal(ballot.n2358,50);
+    assert.equal(numbers.applyVotes(ballot,[2358]),undefined);
+    assert.equal(numbers.applyVotes(ballot,[1]),undefined);
+    const cancelled = numbers.applyVotes(ballot,[2358],false);
+    assert.equal(cancelled.n2358,49);
+    assert.equal(ballot.n2358,50,'transaction input must not mutate');
+    const replacement = numbers.applyVotes(cancelled,[1]);
+    assert.equal(numbers.totalVotes(replacement),50);
+    assert.equal(replacement.n1,1);
 });
-test('retry with a concurrent twentieth choice rejects the twenty-first', () => {
-    const original = Object.fromEntries(Array.from({length:19},(_,i)=>[`n${i+1}`,true]));
-    assert.ok(numbers.change(original,2358,true));
-    const latest = numbers.change(original,20,true);
-    assert.equal(numbers.change(latest,2358,true),undefined);
+test('comma, Chinese comma, enumeration comma and full-width digits split into votes', () => {
+    assert.deepEqual(numbers.parseBatch(' １,２，2358、1\n2 ').numbers,[1,2,2358,1,2]);
+    assert.ok(numbers.parseBatch('1,2.5').error);
+    assert.ok(numbers.parseBatch('').error);
+    assert.ok(numbers.parseBatch(Array(51).fill(1).join(',')).error);
+    assert.ok(numbers.findBatch(items,'1,2401').error,'one invalid number rejects the entire batch');
+    assert.deepEqual(numbers.findBatch(items,'1,2358、1').numbers,[1,2358,1]);
+    assert.deepEqual(numbers.applyVotes({},[1,2358,1]),{_format:2,n1:2,n2358:1});
 });
-test('rankings count distinct voter ballots and exclude empty selections', () => {
-    const result = numbers.summarize({one:{n2358:true,n2301:true},two:{n2358:true},cancelled:{},invalid:{n0:true,n9999999:true,n7:false}});
+test('atomic batches and transaction retries cannot overspend the fiftieth vote', () => {
+    const original = {n1:48};
+    assert.equal(numbers.applyVotes(original,[1,2,3]),undefined);
+    assert.deepEqual(original,{n1:48});
+    const next=numbers.applyVotes(original,[1,2358]);
+    assert.deepEqual(next,numbers.applyVotes(original,[1,2358]),'retry callback with the same snapshot remains pure');
+    assert.equal(numbers.totalVotes(next),50);
+    assert.equal(numbers.applyVotes(next,[1]),undefined);
+});
+test('legacy boolean votes count as one and rankings sum repeated votes', () => {
+    const result = numbers.summarize({one:{n2358:3,n2301:true},two:{n2358:true},cancelled:{_format:2},invalid:{n0:true,n9999999:true,n7:false,n8:-2,n9:1.5}});
     assert.equal(result.participants,2);
-    assert.equal(result.total,3);
-    assert.deepEqual(result.ranking,[{number:2358,votes:2},{number:2301,votes:1}]);
+    assert.equal(result.total,5);
+    assert.deepEqual(result.ranking,[{number:2358,votes:4},{number:2301,votes:1}]);
+    assert.equal(numbers.applyVotes({n2358:true},[2358]).n2358,2);
+});
+test('new ballots override legacy ballots once and empty migrated ballots never resurrect votes', () => {
+    const data={numberBallots:{r0:{one:{n2358:true},two:{n1:true}}}};
+    const migrated=numbers.applyVotes(data.numberBallots.r0.one,[2358]);
+    data.numberBallotsV2={r0:{one:migrated}};
+    assert.equal(numbers.summarize(numbers.effectiveBallots(data,'r0')).total,3);
+    data.numberBallotsV2.r0.one=numbers.applyVotes(numbers.applyVotes(migrated,[2358],false),[2358],false);
+    assert.deepEqual(data.numberBallotsV2.r0.one,{_format:2});
+    assert.equal(numbers.summarize(numbers.effectiveBallots(data,'r0')).total,1);
+    assert.equal(data.numberBallots.r0.one.n2358,true,'legacy data must remain untouched');
+    assert.equal(numbers.summarize(numbers.effectiveBallots(data,'r1')).total,0);
 });

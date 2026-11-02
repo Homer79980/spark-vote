@@ -3,11 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {startServer} = require('./fixture-server.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_CORE_PATH || 'playwright-core');
+const numbers = require('../number-voting.js');
 const voter = '11111111-1111-4111-8111-111111111111';
 const image = process.env.SPARK_NUMBER_IMAGE
     ? 'data:image/png;base64,'+fs.readFileSync(process.env.SPARK_NUMBER_IMAGE).toString('base64')
     : 'data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1400"><rect width="900" height="1400" fill="#faf9f5"/><text x="100" y="100" font-size="48">2301–2400</text><rect x="100" y="200" width="700" height="1100" fill="#27775a"/></svg>').toString('base64');
-const initial = {round:0,maxVotes:1,headcount:4,items:[
+const initial = {round:0,maxVotes:1,headcount:4,numberBallots:{r0:{[voter]:{n2358:true}}},items:[
     {name:'01_1-100',group:'A',url:image,votes:2},
     {name:'24_2301-2400',group:'B',url:image,votes:3}
 ]};
@@ -34,13 +35,16 @@ async function main() {
         };
         const page=await setupPage('?voteDelay=150');
         const quota=()=>page.locator('#number-vote-quota').innerText();
-        const ballot=()=>page.evaluate(voter=>JSON.parse(localStorage.getItem('spark-vote-browser-test')).numberBallots?.r0?.[voter]||{},voter);
-        const vote=async(number)=>{
-            await page.locator('#number-vote-input').fill(String(number));
+        const ballot=()=>page.evaluate(voter=>{
+            const data=JSON.parse(localStorage.getItem('spark-vote-browser-test'));
+            return data.numberBallotsV2?.r0?.[voter]||data.numberBallots?.r0?.[voter]||{};
+        },voter);
+        const vote=async(value)=>{
+            await page.locator('#number-vote-input').fill(String(value));
             await page.locator('#number-vote-panel [data-number-submit]').click();
-            await page.waitForFunction(number=>document.getElementById('number-vote-status').textContent.includes(`${number} 号投票成功`),number);
+            await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').classList.contains('success'));
         };
-        assert.match(await quota(),/0 \/ 20/);
+        assert.match(await quota(),/1 \/ 50/,'existing boolean votes already consume quota');
         assert.match(await page.locator('#number-legacy-summary').innerText(),/5 票/);
         await page.locator('#number-vote-input').fill('2358');
         await page.getByRole('button',{name:'查看所在图',exact:true}).click();
@@ -52,70 +56,87 @@ async function main() {
         assert.equal(await page.locator('#modalItemName').innerText(),'24_2301-2400','editing input must not change image');
         await page.locator('#modalNumberVoting [data-number-submit]').click();
         assert.match(await page.locator('#modal-number-status').innerText(),/等待服务器确认/);
-        assert.match(await quota(),/0 \/ 20/,'unconfirmed vote does not appear as saved');
-        await page.waitForFunction(()=>document.getElementById('modal-number-status').textContent.includes('2358 号投票成功'));
+        assert.match(await quota(),/1 \/ 50/,'unconfirmed vote does not appear as saved');
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('2358 号 × 2'));
         assert.equal(await page.locator('#modalZoomValue').innerText(),'125%');
-        assert.match(await quota(),/1 \/ 20/);
-        assert.equal((await ballot()).n2358,true);
+        assert.match(await quota(),/2 \/ 50/);
+        assert.equal((await ballot()).n2358,2);
         await page.locator('#modalNumberVoting [data-number-submit]').click();
-        assert.match(await page.locator('#modal-number-status').innerText(),/已投过/);
-        await page.locator('#modal-number-input').fill('1');
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('2358 号 × 3'));
+        assert.equal(await page.locator('[data-number-chip="2358"]').count(),1,'repeat votes share one numbered row');
+        await page.locator('#modal-number-input').fill('1,2，2358、1');
         await page.locator('#modalNumberVoting [data-number-submit]').click();
-        assert.match(await page.locator('#modal-number-status').innerText(),/另一张/);
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('本次 +4 票'));
+        assert.match(await quota(),/7 \/ 50/);
+        assert.deepEqual(await ballot(),{n2358:4,_format:2,n1:2,n2:1});
+        assert.deepEqual(dialogs,[],'single and batch voting must never open dialogs');
         await page.keyboard.press('Escape');
-        for(const invalid of ['2401','1e2','0']) {
+        for(const invalid of ['', '1,2401','1e2','0']) {
             await page.locator('#number-vote-input').fill(invalid);
             await page.locator('#number-vote-panel [data-number-submit]').click();
             assert.match(await page.locator('#number-vote-status').getAttribute('class'),/error/);
         }
-        await page.reload();
-        assert.match(await quota(),/1 \/ 20/,'confirmed selection survives reload');
+        assert.equal(numbers.totalVotes(await ballot()),7,'invalid batch writes no partial votes');
+        await page.reload({waitUntil:'domcontentloaded'});
+        assert.match(await quota(),/7 \/ 50/,'confirmed repeated votes survive reload');
         assert.equal(await page.locator('[data-number-cancel="2358"]').count(),1);
 
         await page.getByRole('button',{name:'模拟下次保存失败'}).click();
-        await page.locator('#number-vote-input').fill('1');
+        await page.locator('#number-vote-input').fill('1,2');
         await page.locator('#number-vote-panel [data-number-submit]').click();
         await page.waitForFunction(()=>document.getElementById('number-vote-status').textContent.includes('操作未成功'));
-        assert.match(await quota(),/1 \/ 20/,'failed vote does not consume quota');
-        await vote(1);
-        for(let number=2;number<=19;number++) await vote(number);
-        assert.match(await quota(),/20 \/ 20/,'quota is shared across groups and sheets');
-        await page.locator('#number-vote-input').fill('20');
-        await page.locator('#number-vote-panel [data-number-submit]').click();
-        assert.match(await page.locator('#number-vote-status').innerText(),/已选满 20/);
-        assert.equal(Object.keys(await ballot()).length,20);
+        assert.match(await quota(),/7 \/ 50/,'failed batch does not consume quota');
+        await vote('1,2');
+        assert.match(await quota(),/9 \/ 50/);
         assert.deepEqual(dialogs,[],'submitting numbered votes must never open a dialog');
-        console.log('PASS first 20 choices, reload, validation, and rejected save.');
         await page.locator('[data-number-cancel="2358"]').click();
-        await page.waitForFunction(()=>document.getElementById('number-vote-status').textContent.includes('2358 号已撤销'));
-        assert.match(await quota(),/19 \/ 20/);
-        await vote(20);
-        await page.locator('[data-number-cancel="20"]').click();
-        await page.waitForFunction(()=>document.getElementById('number-vote-status').textContent.includes('20 号已撤销'));
+        await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销 1 票'));
+        assert.match(await quota(),/8 \/ 50/);
+        assert.equal((await ballot()).n2358,3,'cancel decrements one vote');
+        await page.locator('#number-vote-input').fill(Array(43).fill('1').join(','));
+        await page.locator('#number-vote-panel [data-number-submit]').click();
+        assert.match(await page.locator('#number-vote-status').innerText(),/本次需 43 票，还剩 42 票/);
+        assert.equal(numbers.totalVotes(await ballot()),8,'over-budget batch is rejected atomically');
+        await vote(Array(41).fill('1').join('、'));
+        assert.match(await quota(),/49 \/ 50/);
+        console.log('PASS legacy compatibility, repeat counts, mixed separators, atomic batches, quota, reload and failure retry.');
 
         const second=await setupPage('?voteDelay=150');
-        await page.locator('#number-vote-input').fill('20');
+        await page.locator('#number-vote-input').fill('1');
         await second.locator('#number-vote-input').fill('2358');
         await Promise.all([page.locator('#number-vote-panel [data-number-submit]').click(),second.locator('#number-vote-panel [data-number-submit]').click()]);
         await Promise.all([page.waitForFunction(()=>!numberSubmitting),second.waitForFunction(()=>!numberSubmitting)]);
-        assert.equal(Object.keys(await ballot()).length,20,'two tabs cannot claim the last place twice');
-        console.log('PASS cross-tab last-place contention.');
-        await page.reload();
-        assert.match(await quota(),/20 \/ 20/);
-        assert.equal(await page.locator('[data-number-cancel]').count(),20);
+        assert.equal(numbers.totalVotes(await ballot()),50,'two tabs cannot spend the last vote twice');
+        console.log('PASS cross-tab contention at 49/50 votes.');
+        await page.reload({waitUntil:'domcontentloaded'});
+        assert.match(await quota(),/50 \/ 50/);
+        assert.equal(await page.locator('[data-number-cancel]').count(),3);
+        await page.locator('#number-vote-input').fill('1');
+        await page.locator('#number-vote-panel [data-number-submit]').click();
+        assert.match(await page.locator('#number-vote-status').innerText(),/还剩 0 票/);
+        for(let count=0;count<2;count++) {
+            await page.locator('[data-number-cancel="2"]').click();
+            await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销 1 票'));
+        }
+        assert.equal(await page.locator('[data-number-chip="2"]').count(),0);
+        await vote('2,2');
+        assert.equal(await page.locator('[data-number-chip="2"]').count(),1);
+        assert.match(await page.locator('[data-number-chip="2"]').innerText(),/× 2/);
         const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('spark-vote-browser-test')));
         assert.deepEqual(saved.items.map(item=>item.votes),[2,3],'old whole-image votes remain unchanged');
+        assert.equal(saved.numberBallots.r0[voter].n2358,true,'legacy numbered votes remain intact in their original branch');
         const csv=await page.evaluate(()=>buildExportCsv());
-        assert.match(csv,/"20"/);
+        assert.match(csv,/"每人最多票数","50"/);
+        assert.match(csv,/"2","2","01_1-100"/);
         assert.match(csv,/原整图投票记录/);
         assert.match(csv,/"2400","0","24_2301-2400"/);
 
         await page.locator('.footer').click();
-        assert.equal(await page.locator('#stat-totalvotes').innerText(),'20');
+        assert.equal(await page.locator('#stat-totalvotes').innerText(),'50');
         assert.equal(await page.locator('#stat-headcount').innerText(),'1');
         await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.getElementById('save-status').textContent.includes('保存成功'));
-        assert.equal(Object.keys(await ballot()).length,20,'saving image metadata preserves numbered ballots');
+        assert.equal(numbers.totalVotes(await ballot()),50,'saving image metadata preserves all repeated votes');
         await page.locator('.edit-name').first().fill('重复_2350-2450');
         await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.getElementById('save-status').textContent.includes('重叠'));
@@ -143,7 +164,7 @@ async function main() {
         await page.getByRole('button',{name:'切换网络状态'}).click();
         assert.ok(await page.locator('#number-vote-panel [data-number-submit]').isDisabled());
         assert.deepEqual(errors,[]);
-        console.log('PASS: input/range lookup; modal vote; server-confirmed success; reload; duplicate/invalid/wrong-sheet rejection; failure retry; 20 choices across groups; cancel/replace; concurrent tabs at quota; CSV/ranking; admin save preservation/overlap rejection; zoom; mobile/landscape; offline disabled. Local fixture only.');
+        console.log('PASS: no vote dialogs; old votes count as one; repeat +1; mixed comma/Chinese comma/enumeration separators; cross-sheet batches; atomic validation/quota/failure; reload; 50 total votes; decrement/revote; concurrent tabs; CSV/ranking; admin saves; zoom; mobile/landscape; offline disabled. Local fixture only.');
     } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

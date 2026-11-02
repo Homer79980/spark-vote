@@ -136,9 +136,11 @@ test('saving image edits keeps numbered ballots that arrived while editing', asy
     const old = {name:'24_2301-2400',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:3};
     const app = setup([row({name:'24_2301-2400',originalIndex:'0',group:'新组'})],{items:[old],round:0,maxVotes:1});
     app.server.data.numberBallots = {r0:{voter:{n2358:true}},r1:{archived:{n2301:true}}};
+    app.server.data.numberBallotsV2 = {r0:{voter:{n2358:4,_format:2}}};
     await app.context.saveAll();
     assert.equal(app.writes[0].numberBallots.r0.voter.n2358,true);
     assert.equal(app.writes[0].numberBallots.r1.archived.n2301,true);
+    assert.equal(app.writes[0].numberBallotsV2.r0.voter.n2358,4);
     assert.equal(app.writes[0].items[0].votes,3);
 });
 
@@ -151,9 +153,9 @@ test('overlapping numbered uploads fail validation without replacing server item
 
 test('number CSV excludes earlier rounds, preserves legacy votes, and escapes spreadsheet formulas', () => {
     const app=setup([],{items:[{name:'24_2301-2400',url:'x',group:'=SUM(1,2)',votes:3}],round:1,
-        numberBallots:{r0:{old:{n2301:true}},r1:{one:{n2358:true}}}});
+        numberBallots:{r0:{old:{n2301:true}},r1:{one:{n2358:true}}},numberBallotsV2:{r1:{one:{n2358:3,_format:2}}}});
     const csv=app.context.buildExportCsv();
-    assert.match(csv,/"2358","1"/);
+    assert.match(csv,/"2358","3"/);
     assert.match(csv,/"2301","0"/);
     assert.match(csv,/"'=SUM\(1,2\)"/);
     assert.match(csv,/原整图投票记录/);
