@@ -155,7 +155,7 @@ test('number CSV excludes earlier rounds, preserves legacy votes, and escapes sp
     const app=setup([],{items:[{name:'24_2301-2400',url:'x',group:'=SUM(1,2)',votes:3}],round:1,
         numberBallots:{r0:{old:{n2301:true}},r1:{one:{n2358:true}}},numberBallotsV2:{r1:{one:{n2358:3,_format:2}}}});
     const csv=app.context.buildExportCsv();
-    assert.match(csv,/"2358","3"/);
+    assert.match(csv,/"2358","1"/);
     assert.match(csv,/"2301","0"/);
     assert.match(csv,/"'=SUM\(1,2\)"/);
     assert.match(csv,/原整图投票记录/);

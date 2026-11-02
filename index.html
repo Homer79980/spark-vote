@@ -198,7 +198,7 @@
             <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;">
             <span>票</span>
         </div>
-        <p class="number-rule">编号总览图：所有图片合计，每人最多 <b>50 票</b>。同一编号可重复投票，每次加 1 票。</p>
+        <p class="number-rule">编号总览图：所有图片合计，每人最多 <b>50 票</b>。每人每个编号只能投 1 票。</p>
         <datalist id="group-suggestions"></datalist>
         <section id="batch-upload" class="batch-upload" aria-label="批量添加图片"
             ondragover="event.preventDefault(); this.classList.add('drag-over')"
@@ -233,7 +233,7 @@
     <p id="local-draft-notice" class="save-status" role="status" hidden>发现尚未同步的图片草稿，请进入管理入口继续保存。</p>
     <section id="number-vote-panel" class="number-panel" hidden aria-label="按编号投票">
         <h3>按编号投给喜欢的方案</h3>
-        <p class="number-rule">共 50 票，可重复投票；多个编号用逗号或顿号分隔。</p>
+        <p class="number-rule">共 50 票，每个编号限投 1 票；多个编号用逗号或顿号分隔。</p>
         <form class="number-form" novalidate onsubmit="event.preventDefault(); submitNumberVote('number-vote-input')">
             <label for="number-vote-input">方案编号</label>
             <input id="number-vote-input" type="text" maxlength="1000" placeholder="如 101,102、103" autocomplete="off" required>
@@ -287,7 +287,7 @@
     <button class="modal-nav next" onclick="nextImage(event)">&#10095;</button>
 </div>
 
-<script src="number-voting.js?v=20261102-2"></script>
+<script src="number-voting.js?v=20261102-3"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
 <script>
@@ -532,7 +532,7 @@
         const summary = SparkNumbers.summarize(numberBallots());
         document.getElementById('number-vote-quota').textContent = `我已投 ${used} / 50 票，还剩 ${Math.max(0, 50 - used)} 票。`;
         document.getElementById('number-my-selections').innerHTML = mine.length ? mine.map(number =>
-            `<span class="number-chip" data-number-chip="${number}"><button type="button" onclick="locateNumber(${number})" aria-label="查看 ${number} 号">${number} <b>× ${SparkNumbers.voteCount(myBallot[`n${number}`])}</b></button><button type="button" class="number-cancel" data-number-cancel="${number}" onclick="cancelNumberVote(${number})" aria-label="撤销 ${number} 号一票" title="撤销一票">撤销</button></span>`).join('') : '<span class="number-legacy">尚未投票</span>';
+            `<span class="number-chip" data-number-chip="${number}"><button type="button" onclick="locateNumber(${number})" aria-label="查看 ${number} 号">${number}</button><button type="button" class="number-cancel" data-number-cancel="${number}" onclick="cancelNumberVote(${number})" aria-label="撤销 ${number} 号一票" title="撤销一票">撤销</button></span>`).join('') : '<span class="number-legacy">尚未投票</span>';
         document.getElementById('number-ranking-summary').textContent = '编号票数排行';
         document.getElementById('number-ranking-body').innerHTML = summary.ranking.length ? summary.ranking.map(({number, votes}) => {
             const match = SparkNumbers.find(items, number);
@@ -565,9 +565,11 @@
         const batch = SparkNumbers.findBatch(currentData.items, document.getElementById(inputId).value);
         if (batch.error) return setNumberVoteStatus(`${batch.error} 本次未投票。`, 'error');
         const remaining = Math.max(0, SparkNumbers.LIMIT - myNumberVotes());
-        if (batch.numbers.length > remaining) return setNumberVoteStatus(`本次需 ${batch.numbers.length} 票，还剩 ${remaining} 票；每人最多 50 票。请减少编号或先撤销一票，本次未投票。`, 'error');
+        const newNumbers = batch.numbers.filter(number => !SparkNumbers.voteCount(myNumberBallot()[`n${number}`]));
+        if (!newNumbers.length) return setNumberVoteStatus('这些编号已经投过票。');
+        if (newNumbers.length > remaining) return setNumberVoteStatus(`本次需 ${newNumbers.length} 票，还剩 ${remaining} 票；每人最多 50 票，本次未投票。`, 'error');
         if (!dataLoaded || !databaseConnected) return setNumberVoteStatus('尚未连接服务器，请连接恢复后再投票。', 'error');
-        await saveNumberChoice(batch.numbers, true);
+        await saveNumberChoice(newNumbers, true);
     }
     async function cancelNumberVote(number) {
         if (numberSubmitting || !myNumberChoices().includes(number)) return;
@@ -590,12 +592,14 @@
             return;
         }
         const timer = setTimeout(() => setNumberVoteStatus('服务器尚未确认，请保留页面，连接恢复后会继续处理。'), 15000);
-        let aborted = '';
+        let aborted = '', added = 0;
         try {
             const result = await db.ref(`sparkVote/numberBallotsV2/${round}/${voter}`).transaction(ballot => {
                 if (numberRoundKey() !== round) { aborted = '投票轮次已更新，请核对后重新选择。'; return; }
                 if (selected && numbers.some(number => SparkNumbers.find(currentData.items, number).error)) { aborted = '编号范围已变化，请核对后重新投票。'; return; }
                 const previous = ballot || currentData.numberBallots?.[round]?.[voter] || {};
+                added = selected ? numbers.filter(number => !SparkNumbers.voteCount(previous[`n${number}`])).length : 0;
+                if (selected && !added) { aborted = '这些编号已经投过票。'; return; }
                 const next = SparkNumbers.applyVotes(previous, numbers, selected);
                 if (next === undefined) aborted = '剩余票数不足（含其他标签页的投票），本次全部未提交，每人最多 50 票。';
                 return next;
@@ -606,7 +610,7 @@
             currentData.numberBallotsV2[round] = currentData.numberBallotsV2[round] || {};
             const saved = result.snapshot.val() || {_format: 2};
             currentData.numberBallotsV2[round][voter] = saved;
-            setNumberVoteStatus(selected ? `投票成功，已保存 ${numbers.length} 票。` : `已撤销 ${numbers[0]} 号的 1 票。`, 'success');
+            setNumberVoteStatus(selected ? `投票成功，已保存 ${added} 票。` : `已撤销 ${numbers[0]} 号的 1 票。`, 'success');
         } catch (error) {
             setNumberVoteStatus(`操作未成功：${error.message || error.code}。请核对已投列表后重试。`, 'error');
         } finally {

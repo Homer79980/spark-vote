@@ -24,10 +24,9 @@
     function parseBatch(value) {
         const tokens = String(value ?? '').normalize('NFKC').trim().split(/[,、\s]+/).filter(Boolean);
         if (!tokens.length) return {error: '请输入编号，可用逗号或顿号分隔，例如 101,102、103。'};
-        if (tokens.length > LIMIT) return {error: `一次最多投 ${LIMIT} 票，请减少输入的编号。`};
         const numbers = tokens.map(parseNumber);
         if (numbers.some(number => number === null)) return {error: '编号须为正整数，多个编号请用逗号或顿号分隔。'};
-        return {numbers};
+        return {numbers: [...new Set(numbers)]};
     }
     function findBatch(items, value) {
         const parsed = parseBatch(value);
@@ -46,7 +45,7 @@
         }
         return '';
     }
-    function voteCount(value) { return value === true ? 1 : Number.isSafeInteger(value) && value > 0 ? value : 0; }
+    function voteCount(value) { return value === true || (Number.isSafeInteger(value) && value > 0) ? 1 : 0; }
     function choices(ballot) {
         return Object.entries(ballot || {}).filter(([key, value]) => /^n[1-9]\d{0,6}$/.test(key) && voteCount(value) > 0 && parseNumber(key.slice(1)) !== null)
             .map(([key]) => Number(key.slice(1))).sort((a, b) => a - b);
@@ -54,17 +53,17 @@
     function totalVotes(ballot) { return choices(ballot).reduce((sum, number) => sum + voteCount(ballot[`n${number}`]), 0); }
     function applyVotes(ballot, numbers, adding = true) {
         if (!Array.isArray(numbers) || !numbers.length || numbers.some(number => parseNumber(number) === null)) return undefined;
-        if (adding && totalVotes(ballot) + numbers.length > LIMIT) return undefined;
+        const unique = [...new Set(numbers.map(Number))];
+        if (adding && totalVotes(ballot) + unique.filter(number => !voteCount(ballot?.[`n${number}`])).length > LIMIT) return undefined;
         const next = {...(ballot || {}), _format: 2};
-        for (const number of numbers) {
+        for (const number of unique) {
             const key = `n${Number(number)}`, count = voteCount(next[key]);
-            if (adding) next[key] = count + 1;
-            else if (count > 1) next[key] = count - 1;
-            else delete next[key];
+            if (adding && !count) next[key] = 1;
+            else if (!adding) delete next[key];
         }
         return next;
     }
-    // Retain the older API for a previously cached page, without reducing numeric counts.
+    // Retain the older API for previously cached pages.
     function change(ballot, number, selected) {
         if (selected && voteCount(ballot?.[`n${Number(number)}`])) return {...ballot};
         return applyVotes(ballot, [number], selected);
