@@ -544,7 +544,7 @@
         document.querySelectorAll('[data-number-submit], [data-number-cancel]').forEach(button => {
             button.disabled = numberSubmitting || !dataLoaded || !databaseConnected;
         });
-        setNumberVoteStatus(numberVoteMessage || (dataLoaded && databaseConnected ? '输入编号并确认后，等待服务器保存成功。' : '正在连接服务器，请稍候再投票。'), numberVoteMessageKind, false);
+        setNumberVoteStatus(numberVoteMessage || (dataLoaded && databaseConnected ? '输入编号后点击投票，保存结果会显示在这里。' : '正在连接服务器，请稍候再投票。'), numberVoteMessageKind, false);
     }
     function locateNumber(value) {
         const match = SparkNumbers.find(currentData.items, value);
@@ -561,7 +561,6 @@
         if (myNumberChoices().includes(match.number)) return setNumberVoteStatus(`您已投过 ${match.number} 号，每个编号只能投一票。`, 'error');
         if (myNumberChoices().length >= SparkNumbers.LIMIT) return setNumberVoteStatus('已选满 20 个编号，请先在“我已投的编号”中撤销一个。', 'error');
         if (!dataLoaded || !databaseConnected) return setNumberVoteStatus('尚未连接服务器，请连接恢复后再投票。', 'error');
-        if (!confirm(`确定投给 ${match.number} 号？\n所在总览图：${match.item.name}\n所有图片合计最多选择 20 个不同编号。`)) return;
         await saveNumberChoice(match.number, true);
     }
     async function cancelNumberVote(number) {
@@ -573,16 +572,18 @@
         if (numberSubmitting) return;
         if (!dataLoaded || !databaseConnected) return setNumberVoteStatus('尚未连接服务器，请连接恢复后重试。', 'error');
         numberSubmitting = true;
+        const round = numberRoundKey();
+        setNumberVoteStatus(`正在${selected ? '保存' : '撤销'} ${number} 号，等待服务器确认…`);
+        renderNumberVoting();
         let voter;
         try {
             voter = navigator.locks ? await navigator.locks.request('spark-number-voter-identity', () => numberVoterId(true)) : numberVoterId(true);
         } catch (error) {
             numberSubmitting = false;
-            return setNumberVoteStatus(error.message, 'error');
+            setNumberVoteStatus(error.message, 'error');
+            renderNumberVoting();
+            return;
         }
-        const round = numberRoundKey();
-        setNumberVoteStatus(`正在${selected ? '保存' : '撤销'} ${number} 号，等待服务器确认…`);
-        renderNumberVoting();
         const timer = setTimeout(() => setNumberVoteStatus('服务器尚未确认，请保留页面，连接恢复后会继续处理。'), 15000);
         let aborted = '';
         try {

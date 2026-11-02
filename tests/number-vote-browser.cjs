@@ -15,7 +15,7 @@ const initial = {round:0,maxVotes:1,headcount:4,items:[
 async function main() {
     const server = await startServer();
     const browser = await chromium.launch({headless:true,channel:'msedge'});
-    const errors=[];
+    const errors=[], dialogs=[];
     try {
         const context=await browser.newContext({viewport:{width:1440,height:1000}});
         await context.addInitScript(({initial,voter})=>{
@@ -26,7 +26,7 @@ async function main() {
         const setupPage=async(search='')=>{
             const page=await context.newPage();
             page.on('pageerror',e=>errors.push(e.message));
-            page.on('dialog',dialog=>dialog.type()==='prompt'?dialog.accept('123456'):dialog.accept());
+            page.on('dialog',dialog=>{dialogs.push(dialog.type());return dialog.type()==='prompt'?dialog.accept('123456'):dialog.accept();});
             await page.goto(url+search,{waitUntil:'domcontentloaded'});
             await page.waitForFunction(()=>typeof dataLoaded !== 'undefined' && dataLoaded);
             await page.addStyleTag({content:'#test-controls { position: static; z-index: auto; }'});
@@ -84,6 +84,7 @@ async function main() {
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/已选满 20/);
         assert.equal(Object.keys(await ballot()).length,20);
+        assert.deepEqual(dialogs,[],'submitting numbered votes must never open a dialog');
         console.log('PASS first 20 choices, reload, validation, and rejected save.');
         await page.locator('[data-number-cancel="2358"]').click();
         await page.waitForFunction(()=>document.getElementById('number-vote-status').textContent.includes('2358 号已撤销'));
