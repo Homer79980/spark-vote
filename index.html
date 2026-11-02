@@ -117,13 +117,32 @@
         .modal-nav.prev { left: 20px; }
         .modal-nav.next { right: 20px; }
 
-        .modal-content-wrapper { display: flex; flex-direction: column; align-items: center; max-width: 80%; max-height: 90vh; }
-        #modal img { max-width: 100%; max-height: 70vh; border: 3px solid #fff; object-fit: contain; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .modal-content-wrapper { display: flex; flex-direction: column; align-items: center; width: calc(100% - 160px); max-width: 1600px; height: calc(100% - 40px); min-height: 0; }
+        .modal-image-stage { width: 100%; flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; }
+        #modal img { max-width: 100%; max-height: 100%; flex-shrink: 0; box-sizing: border-box; border: 3px solid #fff; object-fit: contain; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transform-origin: center; user-select: none; -webkit-user-drag: none; }
+        .modal-image-stage.zoomed { cursor: grab; }
+        .modal-image-stage.dragging { cursor: grabbing; }
+        .modal-zoom-controls { display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .modal-zoom-controls button { min-width: 40px; height: 36px; padding: 0 10px; border: 1px solid #777; border-radius: 6px; background: #333; color: white; cursor: pointer; font-size: 22px; }
+        .modal-zoom-controls button:hover { background: #555; }
+        .modal-zoom-controls button:disabled { cursor: not-allowed; opacity: 0.4; }
+        #modalZoomReset { font-size: 13px; }
+        #modalZoomValue { min-width: 52px; color: white; font-size: 14px; font-variant-numeric: tabular-nums; }
+        .modal-zoom-hint { color: #bbb; font-size: 12px; }
         
-        .modal-footer { margin-top: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px; background: rgba(0,0,0,0.5); padding: 15px 30px; border-radius: 12px; }
-        #modalItemName { color: white; font-size: 1.4rem; font-weight: bold; letter-spacing: 1px; }
+        .modal-footer { flex-shrink: 0; max-width: 100%; box-sizing: border-box; margin-top: 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 12px; }
+        #modalItemName { color: white; font-size: 1.1rem; font-weight: bold; letter-spacing: 1px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #modalVoteBtn { padding: 10px 30px; font-size: 1.1rem; border-radius: 30px; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; min-width: 150px; }
         #modalVoteBtn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        @media (max-width: 600px) {
+            .modal-content-wrapper { width: calc(100% - 16px); height: calc(100% - 64px); margin-top: 32px; }
+            .modal-close { top: 6px; right: 14px; }
+            .modal-nav { padding: 10px; font-size: 24px; }
+            .modal-nav.prev { left: 4px; }
+            .modal-nav.next { right: 4px; }
+            .modal-footer { padding: 8px 12px; }
+            #modalVoteBtn { padding: 8px 18px; font-size: 0.95rem; max-width: 100%; }
+        }
         
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .footer { text-align: center; margin-top: 50px; color: #ccc; font-size: 12px; cursor: pointer; }
@@ -194,8 +213,17 @@
     <button class="modal-nav prev" onclick="prevImage(event)">&#10094;</button>
     
     <div class="modal-content-wrapper" onclick="event.stopPropagation()">
-        <img id="modalImg" src="">
+        <div id="modalImageStage" class="modal-image-stage">
+            <img id="modalImg" src="" alt="图片预览" draggable="false">
+        </div>
         <div class="modal-footer">
+            <div class="modal-zoom-controls" role="group" aria-label="图片缩放">
+                <button id="modalZoomOut" type="button" aria-label="缩小图片" title="缩小" onclick="zoomModalBy(1 / 1.25)">−</button>
+                <output id="modalZoomValue" aria-label="缩放比例（适应窗口为100%）">100%</output>
+                <button id="modalZoomIn" type="button" aria-label="放大图片" title="放大" onclick="zoomModalBy(1.25)">+</button>
+                <button id="modalZoomReset" type="button" onclick="resetModalZoom()">适应窗口</button>
+            </div>
+            <span class="modal-zoom-hint">滚轮缩放 · 放大后拖动查看</span>
             <span id="modalItemName">项目名称</span>
             <button id="modalVoteBtn" onclick="modalToggleVote(event)">👍 投一票</button>
         </div>
@@ -215,6 +243,8 @@
     let isAdmin = false;
     let globalMaxVotes = 1;
     let currentModalIndex = 0; // 新增：用于记录当前弹窗展示的图片索引
+    const modalZoom = { scale: 1, x: 0, y: 0, pointer: null };
+    const MODAL_ZOOM_MIN = 0.25, MODAL_ZOOM_MAX = 8;
     const colorPalette = ['#0984e3', '#00b894', '#6c5ce7', '#e17055', '#fdcb6e', '#e84393', '#2d3436', '#00cec9'];
     let groupColorMap = Object.create(null);
     let adminDirty = false;
@@ -518,19 +548,98 @@
     }
     
     // === 弹窗画廊模式相关逻辑 ===
+    function applyModalZoom() {
+        const stage = document.getElementById('modalImageStage');
+        const image = document.getElementById('modalImg');
+        const limitX = Math.max(0, (image.offsetWidth * modalZoom.scale - stage.clientWidth) / 2);
+        const limitY = Math.max(0, (image.offsetHeight * modalZoom.scale - stage.clientHeight) / 2);
+        modalZoom.x = Math.max(-limitX, Math.min(limitX, modalZoom.x));
+        modalZoom.y = Math.max(-limitY, Math.min(limitY, modalZoom.y));
+        image.style.transform = `translate(${modalZoom.x}px, ${modalZoom.y}px) scale(${modalZoom.scale})`;
+        document.getElementById('modalZoomValue').textContent = `${Math.round(modalZoom.scale * 100)}%`;
+        document.getElementById('modalZoomOut').disabled = modalZoom.scale <= MODAL_ZOOM_MIN;
+        document.getElementById('modalZoomIn').disabled = modalZoom.scale >= MODAL_ZOOM_MAX;
+        stage.classList.toggle('zoomed', limitX > 0 || limitY > 0);
+    }
+
+    function endModalDrag() {
+        const stage = document.getElementById('modalImageStage');
+        if (modalZoom.pointer && stage.hasPointerCapture(modalZoom.pointer.id)) stage.releasePointerCapture(modalZoom.pointer.id);
+        modalZoom.pointer = null;
+        stage.classList.remove('dragging');
+    }
+
+    function resetModalZoom() {
+        endModalDrag();
+        modalZoom.scale = 1;
+        modalZoom.x = modalZoom.y = 0;
+        applyModalZoom();
+    }
+
+    function zoomModalBy(factor, clientX, clientY) {
+        endModalDrag();
+        const bounds = document.getElementById('modalImageStage').getBoundingClientRect();
+        const anchorX = clientX == null ? 0 : clientX - bounds.left - bounds.width / 2;
+        const anchorY = clientY == null ? 0 : clientY - bounds.top - bounds.height / 2;
+        const next = Math.max(MODAL_ZOOM_MIN, Math.min(MODAL_ZOOM_MAX, modalZoom.scale * factor));
+        const ratio = next / modalZoom.scale;
+        modalZoom.x = anchorX - (anchorX - modalZoom.x) * ratio;
+        modalZoom.y = anchorY - (anchorY - modalZoom.y) * ratio;
+        modalZoom.scale = next;
+        applyModalZoom();
+    }
+
+    const modalStage = document.getElementById('modalImageStage');
+    modalStage.addEventListener('wheel', event => {
+        event.preventDefault();
+        if (!event.deltaY) return;
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? modalStage.clientHeight : 1;
+        zoomModalBy(Math.exp(-Math.max(-200, Math.min(200, event.deltaY * unit)) * 0.002), event.clientX, event.clientY);
+    }, { passive: false });
+    modalStage.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || modalZoom.pointer || !modalStage.classList.contains('zoomed')) return;
+        event.preventDefault();
+        modalZoom.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        modalStage.setPointerCapture(event.pointerId);
+        modalStage.classList.add('dragging');
+    });
+    modalStage.addEventListener('pointermove', event => {
+        const pointer = modalZoom.pointer;
+        if (!pointer || pointer.id !== event.pointerId) return;
+        modalZoom.x += event.clientX - pointer.x;
+        modalZoom.y += event.clientY - pointer.y;
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+        applyModalZoom();
+    });
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        modalStage.addEventListener(name, event => {
+            if (modalZoom.pointer?.id === event.pointerId) endModalDrag();
+        });
+    }
+    document.getElementById('modalImg').addEventListener('load', applyModalZoom);
+    window.addEventListener('resize', () => {
+        if (document.getElementById('modal').style.display === 'flex') resetModalZoom();
+    });
+
     function openModal(index) { 
         currentModalIndex = parseInt(index);
-        updateModalUI();
         document.getElementById('modal').style.display = 'flex'; 
+        updateModalUI();
+        resetModalZoom();
         document.body.style.overflow = 'hidden'; 
     }
 
     // 更新弹窗内的图片、文字和按钮状态
     function updateModalUI() {
-        if (!currentData.items || currentData.items.length === 0) return;
+        if (!currentData.items || currentData.items.length === 0) { closeModal(); return; }
+        currentModalIndex = Math.min(currentModalIndex, currentData.items.length - 1);
         const item = currentData.items[currentModalIndex];
         
-        document.getElementById('modalImg').src = item.url || 'https://via.placeholder.com/800x600?text=No+Image';
+        const image = document.getElementById('modalImg');
+        const url = item.url || 'https://via.placeholder.com/800x600?text=No+Image';
+        if (image.getAttribute('src') !== url) { image.src = url; resetModalZoom(); }
+        image.alt = item.name || '图片预览';
         document.getElementById('modalItemName').innerText = item.name || '未命名';
 
         // 刷新弹窗内的投票按钮状态
@@ -561,6 +670,7 @@
     function closeModal(e) { 
         // 只有点击背景或关闭按钮才关闭弹窗，点击图片本身不关闭
         if (e && e.target.id !== 'modal' && !e.target.classList.contains('modal-close')) return;
+        resetModalZoom();
         document.getElementById('modal').style.display = 'none'; 
         document.body.style.overflow = 'auto'; 
     }
@@ -570,6 +680,7 @@
         if (currentData.items && currentData.items.length > 0) {
             currentModalIndex = (currentModalIndex - 1 + currentData.items.length) % currentData.items.length;
             updateModalUI();
+            resetModalZoom();
         }
     }
 
@@ -578,6 +689,7 @@
         if (currentData.items && currentData.items.length > 0) {
             currentModalIndex = (currentModalIndex + 1) % currentData.items.length;
             updateModalUI();
+            resetModalZoom();
         }
     }
 
