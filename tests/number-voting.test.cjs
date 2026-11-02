@@ -17,18 +17,18 @@ test('overlapping images cannot silently receive the wrong vote', () => {
     assert.match(numbers.find(duplicate,2358).error,/多张/);
     assert.equal(numbers.overlap(items),'');
 });
-test('one browser gets one vote per number and 50 distinct numbers in total', () => {
+test('one browser gets one vote per number and 500 distinct numbers in total', () => {
     let ballot = numbers.applyVotes({},[2358,2358,2358]);
     assert.equal(numbers.totalVotes(ballot),1);
     assert.equal(ballot.n2358,1);
-    for (let n=1;n<=49;n++) ballot=numbers.applyVotes(ballot,[n]);
-    assert.equal(numbers.totalVotes(ballot),50);
+    for (let n=1;n<=499;n++) ballot=numbers.applyVotes(ballot,[n]);
+    assert.equal(numbers.totalVotes(ballot),500);
     assert.equal(numbers.applyVotes(ballot,[2358]).n2358,1);
-    assert.equal(numbers.applyVotes(ballot,[50]),undefined);
+    assert.equal(numbers.applyVotes(ballot,[500]),undefined);
     const cancelled = numbers.applyVotes(ballot,[2358],false);
-    assert.equal(numbers.totalVotes(cancelled),49);
+    assert.equal(numbers.totalVotes(cancelled),499);
     assert.equal(ballot.n2358,1,'transaction input remains unchanged');
-    assert.equal(numbers.totalVotes(numbers.applyVotes(cancelled,[50])),50);
+    assert.equal(numbers.totalVotes(numbers.applyVotes(cancelled,[500])),500);
 });
 test('batch input deduplicates comma, Chinese comma, enumeration comma and full-width digits', () => {
     assert.deepEqual(numbers.parseBatch(' １,２，2358、1\n2 ').numbers,[1,2,2358]);
@@ -39,13 +39,13 @@ test('batch input deduplicates comma, Chinese comma, enumeration comma and full-
     assert.deepEqual(numbers.findBatch(items,'1,2358、1').numbers,[1,2358]);
     assert.deepEqual(numbers.applyVotes({},[1,2358,1]),{_format:2,n1:1,n2358:1});
 });
-test('atomic batches and retries enforce the 50 distinct number limit', () => {
-    const original = Object.fromEntries(Array.from({length:49},(_,index)=>[`n${index+1}`,1]));
-    assert.equal(numbers.applyVotes(original,[1,50,51]),undefined);
-    const next=numbers.applyVotes(original,[1,50,50]);
-    assert.deepEqual(next,numbers.applyVotes(original,[1,50,50]));
-    assert.equal(numbers.totalVotes(next),50);
-    assert.equal(numbers.applyVotes(next,[51]),undefined);
+test('atomic batches and retries enforce the 500 distinct number limit', () => {
+    const original = Object.fromEntries(Array.from({length:499},(_,index)=>[`n${index+1}`,1]));
+    assert.equal(numbers.applyVotes(original,[1,500,501]),undefined);
+    const next=numbers.applyVotes(original,[1,500,500]);
+    assert.deepEqual(next,numbers.applyVotes(original,[1,500,500]));
+    assert.equal(numbers.totalVotes(next),500);
+    assert.equal(numbers.applyVotes(next,[501]),undefined);
     assert.equal(numbers.applyVotes(next,[1]).n1,1);
 });
 test('old repeated counts remain stored but count as one per browser in rankings', () => {

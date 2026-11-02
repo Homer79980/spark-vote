@@ -9,7 +9,7 @@ const image = process.env.SPARK_NUMBER_IMAGE
     ? 'data:image/png;base64,'+fs.readFileSync(process.env.SPARK_NUMBER_IMAGE).toString('base64')
     : 'data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1400"><rect width="900" height="1400" fill="#faf9f5"/><text x="100" y="100" font-size="48">2301–2400</text><rect x="100" y="200" width="700" height="1100" fill="#27775a"/></svg>').toString('base64');
 const initial = {round:0,maxVotes:1,headcount:4,numberBallots:{r0:{[voter]:{n2358:true}}},numberBallotsV2:{r0:{[voter]:{_format:2,n2358:4}}},items:[
-    {name:'01_1-100',group:'A',url:image,votes:2},
+    {name:'01_1-600',group:'A',url:image,votes:2},
     {name:'24_2301-2400',group:'B',url:image,votes:3}
 ]};
 
@@ -44,7 +44,7 @@ async function main() {
             await page.locator('#number-vote-panel [data-number-submit]').click();
             await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').classList.contains('success'));
         };
-        assert.match(await quota(),/1 \/ 50/,'old repeated votes count as one');
+        assert.match(await quota(),/1 \/ 500/,'old repeated votes count as one');
         assert.equal((await ballot()).n2358,4,'original count remains stored');
         await page.locator('#number-vote-input').fill('2358');
         await page.getByRole('button',{name:'查看所在图',exact:true}).click();
@@ -56,12 +56,12 @@ async function main() {
         await page.locator('#modal-number-input').fill('1,2，2358、1');
         await page.locator('#modalNumberVoting [data-number-submit]').click();
         await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('modal-number-status').textContent.includes('已保存 2 票'));
-        assert.match(await quota(),/3 \/ 50/);
+        assert.match(await quota(),/3 \/ 500/);
         assert.deepEqual(await ballot(),{_format:2,n2358:4,n1:1,n2:1});
         assert.deepEqual(dialogs,[],'voting must not open dialogs');
         await page.keyboard.press('Escape');
         await page.reload({waitUntil:'domcontentloaded'});
-        assert.match(await quota(),/3 \/ 50/);
+        assert.match(await quota(),/3 \/ 500/);
         await page.locator('#number-vote-input').fill('1,1、2358');
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/已经投过/);
@@ -70,7 +70,7 @@ async function main() {
         await page.locator('[data-number-cancel="2358"]').click();
         await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销'));
         assert.equal((await ballot()).n2358,undefined,'cancel removes the one effective vote');
-        assert.match(await quota(),/2 \/ 50/);
+        assert.match(await quota(),/2 \/ 500/);
         await page.reload({waitUntil:'domcontentloaded'});
         assert.equal(await page.locator('[data-number-chip="2358"]').count(),0,'old boolean vote does not resurrect');
         await vote('2358');
@@ -79,39 +79,40 @@ async function main() {
         await page.locator('#number-vote-input').fill('3');
         await page.locator('#number-vote-panel [data-number-submit]').click();
         await page.waitForFunction(()=>document.getElementById('number-vote-status').textContent.includes('操作未成功'));
-        assert.match(await quota(),/3 \/ 50/);
+        assert.match(await quota(),/3 \/ 500/);
         const second=await setupPage('?voteDelay=150');
         await page.locator('#number-vote-input').fill('3');
         await second.locator('#number-vote-input').fill('3');
         await Promise.all([page.locator('#number-vote-panel [data-number-submit]').click(),second.locator('#number-vote-panel [data-number-submit]').click()]);
         await Promise.all([page.waitForFunction(()=>!numberSubmitting),second.waitForFunction(()=>!numberSubmitting)]);
         assert.equal((await ballot()).n3,1,'simultaneous votes for one number count once');
-        await vote(Array.from({length:45},(_,i)=>i+4).join('、'));
-        assert.match(await quota(),/49 \/ 50/);
-        await page.locator('#number-vote-input').fill('49');
-        await second.locator('#number-vote-input').fill('50');
+        await vote(Array.from({length:495},(_,i)=>i+4).join('、'));
+        assert.match(await quota(),/499 \/ 500/);
+        await page.locator('#number-vote-input').fill('499');
+        await second.locator('#number-vote-input').fill('500');
         await Promise.all([page.locator('#number-vote-panel [data-number-submit]').click(),second.locator('#number-vote-panel [data-number-submit]').click()]);
         await Promise.all([page.waitForFunction(()=>!numberSubmitting),second.waitForFunction(()=>!numberSubmitting)]);
-        assert.equal(numbers.totalVotes(await ballot()),50,'two tabs cannot spend the last vote twice');
+        assert.equal(numbers.totalVotes(await ballot()),500,'two tabs cannot spend the last vote twice');
         await page.reload({waitUntil:'domcontentloaded'});
-        assert.match(await quota(),/50 \/ 50/);
+        assert.match(await quota(),/500 \/ 500/);
         await page.locator('#number-vote-input').fill('1');
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/已经投过/);
-        await page.locator('#number-vote-input').fill('51');
+        await page.locator('#number-vote-input').fill('501');
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/还剩 0 票/);
         const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('spark-vote-browser-test')));
         assert.deepEqual(saved.items.map(item=>item.votes),[2,3]);
         assert.equal(saved.numberBallots.r0[voter].n2358,true);
         const csv=await page.evaluate(()=>buildExportCsv());
-        assert.match(csv,/"2","1","01_1-100"/);
+        assert.match(csv,/"2","1","01_1-600"/);
+        assert.match(csv,/"每人最多票数","500"/);
         assert.match(csv,/原整图投票记录/);
         await page.locator('.footer').click();
-        assert.equal(await page.locator('#stat-totalvotes').innerText(),'50');
+        assert.equal(await page.locator('#stat-totalvotes').innerText(),'500');
         await page.locator('#save-button').click();
         await page.waitForFunction(()=>document.getElementById('save-status').textContent.includes('保存成功'));
-        assert.equal(numbers.totalVotes(await ballot()),50,'admin save preserves ballots');
+        assert.equal(numbers.totalVotes(await ballot()),500,'admin save preserves ballots');
         await page.locator('.footer').click();
         const screenshots=process.env.SPARK_SCREENSHOT_DIR;
         if(screenshots) {fs.mkdirSync(screenshots,{recursive:true});await page.screenshot({path:path.join(screenshots,'number-home.png'),fullPage:true});}

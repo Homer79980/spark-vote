@@ -1,6 +1,6 @@
 (function (root) {
     'use strict';
-    const LIMIT = 50;
+    const LIMIT = 500;
     function range(name) {
         const stem = String(name || '').normalize('NFKC').replace(/\.(png|jpe?g|webp|gif|bmp|avif)$/i, '').trim();
         const match = stem.match(/(?:^|[_\s])(\d{1,7})\s*[-–—~～]\s*(\d{1,7})$/);
