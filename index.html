@@ -445,7 +445,13 @@
 
     document.getElementById('admin-list').addEventListener('input', markAdminDirty);
     document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
-    document.getElementById('voteMode').addEventListener('change', markAdminDirty);
+    document.getElementById('voteMode').addEventListener('change', () => {
+        markAdminDirty();
+        renderUserView(currentData.items || []);
+        updateDashboard(currentData);
+        if (document.getElementById('modal').style.display === 'flex') updateModalUI();
+        setSaveStatus('下方是投票方式预览，点击“保存更新”后对所有人生效。');
+    });
     window.addEventListener('beforeunload', event => {
         if (adminDirty || saving || preparingSave || processingImages || numberSubmitting) { event.preventDefault(); event.returnValue = ''; }
     });
@@ -528,13 +534,17 @@
             element.className = `number-status ${kind}`;
         }
     }
+    function displayVoteMode() { return isAdmin && adminDirty ? document.getElementById('voteMode').value : (currentData.voteMode || 'auto'); }
+    function previewingVoteMode() { return displayVoteMode() !== (currentData.voteMode || 'auto'); }
     function usesNumberVoting(item) {
-        return currentData.voteMode === 'number' || (currentData.voteMode !== 'image' && !!SparkNumbers.range(item?.name));
+        const mode = displayVoteMode();
+        return mode === 'number' || (mode !== 'image' && !!SparkNumbers.range(item?.name));
     }
-    function numberMode() { return currentData.voteMode === 'number' || (currentData.voteMode !== 'image' && (currentData.items || []).some(item => SparkNumbers.range(item.name))); }
+    function numberMode() { const mode = displayVoteMode(); return mode === 'number' || (mode !== 'image' && (currentData.items || []).some(item => SparkNumbers.range(item.name))); }
     function renderNumberVoting() {
         const items = currentData.items || [];
-        const enabled = numberMode() || (currentData.voteMode !== 'image' && currentData.voteMode !== 'number' && Object.keys(numberBallots()).length > 0);
+        const mode = displayVoteMode();
+        const enabled = numberMode() || (mode !== 'image' && mode !== 'number' && Object.keys(numberBallots()).length > 0);
         document.getElementById('number-vote-panel').hidden = !enabled;
         const mine = myNumberChoices();
         const myBallot = myNumberBallot(), used = SparkNumbers.totalVotes(myBallot);
@@ -571,6 +581,7 @@
         locateNumber(batch.numbers[0]);
     }
     async function submitNumberVote(inputId) {
+        if (previewingVoteMode()) return setNumberVoteStatus('当前为预览，请先保存投票方式。', 'error');
         if (numberSubmitting) return;
         const batch = SparkNumbers.findBatch(currentData.items, document.getElementById(inputId).value);
         if (batch.error) return setNumberVoteStatus(`${batch.error} 本次未投票。`, 'error');
@@ -582,6 +593,7 @@
         await saveNumberChoice(newNumbers, true);
     }
     async function cancelNumberVote(number) {
+        if (previewingVoteMode()) return setNumberVoteStatus('当前为预览，请先保存投票方式。', 'error');
         if (numberSubmitting || !myNumberChoices().includes(number)) return;
         await saveNumberChoice([number], false);
     }
@@ -713,6 +725,7 @@
 
     // --- 投票核心逻辑 ---
     function toggleVote(index, groupName) {
+        if (previewingVoteMode()) return showToast('当前为预览，请先保存投票方式', '⏳');
         if (usesNumberVoting(currentData.items?.[index])) return openModal(index);
         if (!dataLoaded || !databaseConnected) return showToast('正在同步，请连接恢复后再投票', '⏳');
         let log = getLocalLog();
@@ -945,10 +958,13 @@
                 updateGroupSuggestions(currentData.items || []);
                 if (!adminDirty) { document.getElementById('maxVoteInput').value = globalMaxVotes; document.getElementById('voteMode').value = currentData.voteMode || 'auto'; }
                 restoreEditorDraft();
+                renderUserView(currentData.items || []);
+                updateDashboard(currentData);
             }
         } else { 
             isAdmin = false; 
-            document.getElementById('admin-panel').style.display = 'none'; 
+            document.getElementById('admin-panel').style.display = 'none';
+            renderUserView(currentData.items || []);
         }
     }
 
@@ -1098,14 +1114,14 @@
         if (saving || preparingSave || processingImages) return setSaveStatus('请等待当前操作完成。', 'error');
         if (adminDirty || pendingDraft) return setSaveStatus('有未保存的编辑或草稿，请先保存后再删除。', 'error');
         if (!dataLoaded || !databaseConnected) return setSaveStatus('服务器未连接，无法删除。', 'error');
-        if (!confirm('删除所有图片并开始新一轮投票？旧编号票记录保留，但不再计入新一轮。')) return;
+        if (!confirm('确认永久删除全部图片、所有轮次的编号投票记录及人数？此操作无法撤销。')) return;
         saving = true;
         setSaveStatus('正在删除，等待服务器确认…');
         try {
             const expected = metadataSignature(currentData);
             const result = await db.ref('sparkVote').transaction(server => {
                 if (!server || metadataSignature(server) !== expected) return;
-                return {...server, items: [], headcount: 0, round: (server.round || 0) + 1};
+                return {...server, items: [], headcount: 0, numberBallots: null, numberBallotsV2: null, round: (server.round || 0) + 1};
             }, undefined, false);
             if (!result.committed) throw new Error('数据已变化，请刷新后重新操作');
             currentData = result.snapshot.val();

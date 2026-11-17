@@ -176,14 +176,15 @@ test('admin chooses a voting mode and existing ballots remain intact', async () 
     assert.equal(vm.runInContext('usesNumberVoting(currentData.items[0])',app.context),true);
 });
 
-test('delete all starts a new round and preserves archived ballots', async () => {
-    const initial={items:[{name:'24_2301-2400',url:'x',votes:2}],round:4,maxVotes:1,headcount:5,numberBallotsV2:{r4:{one:{n2358:1}}}};
+test('delete all starts a new round and removes every archived ballot', async () => {
+    const initial={items:[{name:'24_2301-2400',url:'x',votes:2}],round:4,maxVotes:1,headcount:5,numberBallots:{r0:{old:{n7:true}}},numberBallotsV2:{r4:{one:{n2358:1}}}};
     const app=setup([],initial);
     await app.context.deleteAllItems();
     assert.equal(app.server.data.items.length,0);
     assert.equal(app.server.data.round,5);
     assert.equal(app.server.data.headcount,0);
-    assert.equal(app.server.data.numberBallotsV2.r4.one.n2358,1);
+    assert.equal(app.server.data.numberBallotsV2,null);
+    assert.equal(app.server.data.numberBallots,null);
     assert.equal(app.context.numberBallots && Object.keys(app.context.numberBallots()).length,0);
     assert.match(app.elements.get('save-status').textContent,/删除成功/);
 });
