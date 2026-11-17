@@ -161,3 +161,43 @@ test('number CSV excludes earlier rounds, preserves legacy votes, and escapes sp
     assert.match(csv,/原整图投票记录/);
     assert.match(csv,/"24_2301-2400","3"/);
 });
+
+test('admin chooses a voting mode and existing ballots remain intact', async () => {
+    const initial={items:[{name:'24_2301-2400',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:3}],round:0,maxVotes:1,numberBallotsV2:{r0:{one:{n2358:1}}}};
+    const app=setup([row({name:'24_2301-2400',originalIndex:'0'})],initial);
+    app.elements.get('voteMode').value='image';
+    await app.context.saveAll();
+    assert.equal(app.server.data.voteMode,'image');
+    assert.equal(app.server.data.numberBallotsV2.r0.one.n2358,1);
+    assert.equal(vm.runInContext('usesNumberVoting(currentData.items[0])',app.context),false);
+    app.elements.get('voteMode').value='number';
+    await app.context.saveAll();
+    assert.equal(app.server.data.voteMode,'number');
+    assert.equal(vm.runInContext('usesNumberVoting(currentData.items[0])',app.context),true);
+});
+
+test('delete all starts a new round and preserves archived ballots', async () => {
+    const initial={items:[{name:'24_2301-2400',url:'x',votes:2}],round:4,maxVotes:1,headcount:5,numberBallotsV2:{r4:{one:{n2358:1}}}};
+    const app=setup([],initial);
+    await app.context.deleteAllItems();
+    assert.equal(app.server.data.items.length,0);
+    assert.equal(app.server.data.round,5);
+    assert.equal(app.server.data.headcount,0);
+    assert.equal(app.server.data.numberBallotsV2.r4.one.n2358,1);
+    assert.equal(app.context.numberBallots && Object.keys(app.context.numberBallots()).length,0);
+    assert.match(app.elements.get('save-status').textContent,/删除成功/);
+});
+
+test('delete all refuses to discard unsaved work or concurrent changes', async () => {
+    const initial={items:[{name:'old',url:'x'}],round:0,maxVotes:1};
+    const dirty=setup([],initial);
+    dirty.context.markAdminDirty();
+    await dirty.context.deleteAllItems();
+    assert.equal(dirty.writes.length,0);
+    assert.match(dirty.elements.get('save-status').textContent,/未保存/);
+    const concurrent=setup([],initial);
+    concurrent.server.data={items:[{name:'new',url:'x'}],round:0,maxVotes:1};
+    await concurrent.context.deleteAllItems();
+    assert.equal(concurrent.writes.length,0);
+    assert.match(concurrent.elements.get('save-status').textContent,/数据已变化/);
+});

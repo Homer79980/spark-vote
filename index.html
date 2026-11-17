@@ -194,6 +194,8 @@
 
         <h3 style="margin-top:0">🛠 选项管理</h3>
         <div class="config-bar">
+            <label for="voteMode">投票方式：</label>
+            <select id="voteMode"><option value="auto">兼容原有方式</option><option value="image">图片点赞</option><option value="number">批量编号投票</option></select>
             <span>⚙️ <b>普通单图规则：</b>每组每人限投</span>
             <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;">
             <span>票</span>
@@ -204,7 +206,7 @@
             ondragover="event.preventDefault(); this.classList.add('drag-over')"
             ondragleave="this.classList.remove('drag-over')" ondrop="handleBatchDrop(event)">
             <h4>📷 批量添加图片</h4>
-            <p>把多张图片一起拖到这里，或点击按钮多选。名称使用文件名；总览图请保留编号范围，例如 24_2301-2400，可自动开启编号投票。</p>
+            <p>把多张图片一起拖到这里，或点击按钮多选。名称使用文件名；总览图请保留编号范围，例如 24_2301-2400，在管理员处选择编号投票。</p>
             <div class="batch-actions">
                 <label for="batch-group">统一分组</label>
                 <input id="batch-group" list="group-suggestions" placeholder="默认分组（可修改）">
@@ -370,7 +372,7 @@
 
     async function persistEditorDraft(state = 'pending') {
         const revision = ++draftRevision;
-        const draft = { state, baseline: editorBaseline, maxVotes: document.getElementById('maxVoteInput').value,
+        const draft = { state, baseline: editorBaseline, maxVotes: document.getElementById('maxVoteInput').value, voteMode: document.getElementById('voteMode').value,
             group: document.getElementById('batch-group').value, updatedAt: Date.now(),
             rows: Array.from(document.querySelectorAll('#admin-list .admin-item')).map(row => ({
                 name: row.querySelector('.edit-name').value, group: row.querySelector('.edit-group').value,
@@ -401,6 +403,7 @@
         for (const row of pendingDraft.rows) list.appendChild(createAdminRow(row, row.originalIndex === '' ? null : Number(row.originalIndex)));
         editorBaseline = pendingDraft.baseline;
         document.getElementById('maxVoteInput').value = pendingDraft.maxVotes;
+        document.getElementById('voteMode').value = pendingDraft.voteMode || 'auto';
         document.getElementById('batch-group').value = pendingDraft.group || '';
         adminDirty = true;
         refreshLocalSuggestions();
@@ -432,7 +435,7 @@
     const localStateReady = loadLocalState();
 
     function metadataSignature(data) {
-        return JSON.stringify({ round: data.round || 0, maxVotes: data.maxVotes || 1,
+        return JSON.stringify({ round: data.round || 0, maxVotes: data.maxVotes || 1, voteMode: data.voteMode || 'auto',
             items: (data.items || []).map(item => item && ({ name: item.name || '', group: item.group || '', url: item.url || '' })) });
     }
 
@@ -442,6 +445,7 @@
 
     document.getElementById('admin-list').addEventListener('input', markAdminDirty);
     document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
+    document.getElementById('voteMode').addEventListener('change', markAdminDirty);
     window.addEventListener('beforeunload', event => {
         if (adminDirty || saving || preparingSave || processingImages || numberSubmitting) { event.preventDefault(); event.returnValue = ''; }
     });
@@ -477,6 +481,7 @@
                 renderAdminView(data.items || []);
                 updateGroupSuggestions(data.items || []);
                 document.getElementById('maxVoteInput').value = globalMaxVotes;
+                document.getElementById('voteMode').value = data.voteMode || 'auto';
             }
         }
     }, error => {
@@ -523,9 +528,13 @@
             element.className = `number-status ${kind}`;
         }
     }
+    function usesNumberVoting(item) {
+        return currentData.voteMode === 'number' || (currentData.voteMode !== 'image' && !!SparkNumbers.range(item?.name));
+    }
+    function numberMode() { return currentData.voteMode === 'number' || (currentData.voteMode !== 'image' && (currentData.items || []).some(item => SparkNumbers.range(item.name))); }
     function renderNumberVoting() {
         const items = currentData.items || [];
-        const enabled = items.some(item => SparkNumbers.range(item.name)) || Object.keys(numberBallots()).length > 0;
+        const enabled = numberMode() || (currentData.voteMode !== 'image' && currentData.voteMode !== 'number' && Object.keys(numberBallots()).length > 0);
         document.getElementById('number-vote-panel').hidden = !enabled;
         const mine = myNumberChoices();
         const myBallot = myNumberBallot(), used = SparkNumbers.totalVotes(myBallot);
@@ -541,9 +550,10 @@
         const legacyVotes = items.filter(item => SparkNumbers.range(item.name)).reduce((sum, item) => sum + (item.votes || 0), 0);
         document.getElementById('number-legacy-summary').textContent = legacyVotes ? `原整张总览图的 ${legacyVotes} 票单独保留，不计入编号排行。` : '';
         const range = SparkNumbers.range(items[currentModalIndex]?.name);
-        document.getElementById('modalNumberVoting').hidden = !range;
-        document.getElementById('modalVoteBtn').hidden = !!range;
-        document.getElementById('modal-number-range').textContent = range ? `本图 ${range.start}–${range.end} 号 · 已投 ${used}/${SparkNumbers.LIMIT} 票` : '';
+        const numbered = usesNumberVoting(items[currentModalIndex]);
+        document.getElementById('modalNumberVoting').hidden = !numbered;
+        document.getElementById('modalVoteBtn').hidden = numbered;
+        document.getElementById('modal-number-range').textContent = range ? `本图 ${range.start}–${range.end} 号 · 已投 ${used}/${SparkNumbers.LIMIT} 票` : '请管理员在图片名称中设置编号范围。';
         document.querySelectorAll('[data-number-submit], [data-number-cancel]').forEach(button => {
             button.disabled = numberSubmitting || !dataLoaded || !databaseConnected;
         });
@@ -656,7 +666,7 @@
                 const statusHtml = isFull 
                     ? `<span class="group-status voted">✅ 已完成</span>` 
                     : `<span class="group-status">剩余 ${votesLeft} 票</span>`;
-                const groupStatus = groupedItems[groupName].every(item => SparkNumbers.range(item.name)) ? `<span class="group-status">所有编号共用 ${SparkNumbers.LIMIT} 票</span>` : statusHtml;
+                const groupStatus = groupedItems[groupName].every(item => usesNumberVoting(item)) ? `<span class="group-status">所有编号共用 ${SparkNumbers.LIMIT} 票</span>` : statusHtml;
                 section.innerHTML = `<h2 class="group-title" style="border-left-color: ${themeColor}"><span style="color: ${themeColor}">${escapeHtml(groupName)}</span> ${groupStatus}</h2>`;
             }
 
@@ -664,7 +674,8 @@
             grid.className = 'vote-grid';
 
             groupedItems[groupName].forEach(item => {
-                const numberRange = SparkNumbers.range(item.name);
+                const numberRange = usesNumberVoting(item) ? SparkNumbers.range(item.name) : null;
+                const numberedItem = usesNumberVoting(item);
                 const percent = totalVotes === 0 ? 0 : Math.round((item.votes / totalVotes) * 100);
                 const isSelected = groupLog.includes(item.originalIndex);
                 let btnClass = "vote-action-btn";
@@ -687,9 +698,9 @@
                     <div class="card-body">
                         <div>
                             <span class="card-name">${escapeHtml(item.name || '未命名')}</span>
-                            ${numberRange ? `<div class="stats">编号 ${numberRange.start}–${numberRange.end}</div>` : `<div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div><div class="stats">${item.votes || 0} 票 (${percent}%)</div>`}
+                            ${numberedItem ? `<div class="stats">${numberRange ? `编号 ${numberRange.start}–${numberRange.end}` : "请管理员设置编号范围"}</div>` : `<div class="progress-box"><div class="progress-fill" style="width: ${percent}%; background:${themeColor}"></div></div><div class="stats">${item.votes || 0} 票 (${percent}%)</div>`}
                         </div>
-                        ${numberRange ? `<button class="vote-action-btn" onclick="openModal(${item.originalIndex})">查看图片 / 按编号投票</button>` : `<button class="${btnClass}" ${clickAction} ${btnStyle}>${btnText}</button>`}
+                        ${numberedItem ? `<button class="vote-action-btn" onclick="openModal(${item.originalIndex})">查看图片 / 按编号投票</button>` : `<button class="${btnClass}" ${clickAction} ${btnStyle}>${btnText}</button>`}
                     </div>
                 `;
                 grid.appendChild(card);
@@ -702,7 +713,7 @@
 
     // --- 投票核心逻辑 ---
     function toggleVote(index, groupName) {
-        if (SparkNumbers.range(currentData.items?.[index]?.name)) return openModal(index);
+        if (usesNumberVoting(currentData.items?.[index])) return openModal(index);
         if (!dataLoaded || !databaseConnected) return showToast('正在同步，请连接恢复后再投票', '⏳');
         let log = getLocalLog();
         if (!log[groupName]) log[groupName] = [];
@@ -837,7 +848,7 @@
         const numberInput = document.getElementById('modal-number-input');
         if (numberInput.dataset.sheet !== String(currentModalIndex)) { numberInput.value = ''; numberInput.dataset.sheet = String(currentModalIndex); }
         renderNumberVoting();
-        if (SparkNumbers.range(item.name)) return;
+        if (usesNumberVoting(item)) return;
 
         // 刷新弹窗内的投票按钮状态
         const groupName = item.group || '默认分组';
@@ -895,7 +906,7 @@
         if(e) e.stopPropagation();
         const item = currentData.items[currentModalIndex];
         if(!item) return;
-        if (SparkNumbers.range(item.name)) return submitNumberVote('modal-number-input');
+        if (usesNumberVoting(item)) return submitNumberVote('modal-number-input');
         
         const groupName = item.group || '默认分组';
         const log = getLocalLog();
@@ -932,7 +943,7 @@
                 if (!adminDirty) renderAdminView(currentData.items || []);
                 updateDashboard(currentData);
                 updateGroupSuggestions(currentData.items || []);
-                if (!adminDirty) document.getElementById('maxVoteInput').value = globalMaxVotes;
+                if (!adminDirty) { document.getElementById('maxVoteInput').value = globalMaxVotes; document.getElementById('voteMode').value = currentData.voteMode || 'auto'; }
                 restoreEditorDraft();
             }
         } else { 
@@ -943,7 +954,7 @@
 
     function updateDashboard(data) {
         const items = data.items || [];
-        const numbered = items.some(item => SparkNumbers.range(item.name));
+        const numbered = numberMode();
         document.getElementById('stat-headcount-label').textContent = numbered ? '👥 编号参与人数' : '👥 参与人数';
         document.getElementById('stat-totalvotes-label').textContent = numbered ? '🎫 编号总票数' : '🎫 累计票数';
         document.getElementById('stat-topgroup-label').textContent = numbered ? '🔥 得票最多的编号' : '🔥 最热分组';
@@ -1048,7 +1059,7 @@
     }
     function buildExportCsv() {
         const items = currentData.items || [];
-        if (items.some(item => SparkNumbers.range(item.name)) || Object.keys(numberBallots()).length) {
+        if (numberMode() || (currentData.voteMode !== 'image' && currentData.voteMode !== 'number' && Object.keys(numberBallots()).length)) {
             const summary = SparkNumbers.summarize(numberBallots());
             const allNumbers = new Set(summary.counts.keys());
             for (const item of items) {
@@ -1083,7 +1094,31 @@
             db.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
         }
     }
-    function deleteAllItems() { if(confirm("确认删除？")) db.ref('sparkVote/items').set([]); }
+    async function deleteAllItems() {
+        if (saving || preparingSave || processingImages) return setSaveStatus('请等待当前操作完成。', 'error');
+        if (adminDirty || pendingDraft) return setSaveStatus('有未保存的编辑或草稿，请先保存后再删除。', 'error');
+        if (!dataLoaded || !databaseConnected) return setSaveStatus('服务器未连接，无法删除。', 'error');
+        if (!confirm('删除所有图片并开始新一轮投票？旧编号票记录保留，但不再计入新一轮。')) return;
+        saving = true;
+        setSaveStatus('正在删除，等待服务器确认…');
+        try {
+            const expected = metadataSignature(currentData);
+            const result = await db.ref('sparkVote').transaction(server => {
+                if (!server || metadataSignature(server) !== expected) return;
+                return {...server, items: [], headcount: 0, round: (server.round || 0) + 1};
+            }, undefined, false);
+            if (!result.committed) throw new Error('数据已变化，请刷新后重新操作');
+            currentData = result.snapshot.val();
+            checkRoundVersion(currentData.round);
+            renderAdminView([]);
+            renderUserView([]);
+            updateDashboard(currentData);
+            await persistEditorDraft('saved');
+            await writeLocalState('snapshot', currentData).catch(() => {});
+            setSaveStatus('删除成功，已开始新一轮投票。', 'success');
+        } catch (error) { setSaveStatus(`删除失败：${error.message || error.code}。请检查连接后重试。`, 'error'); }
+        finally { saving = false; }
+    }
     function handleDrop(event, zone) {
         event.preventDefault();
         event.stopPropagation();
@@ -1213,10 +1248,10 @@
         if (saving || preparingSave) return;
         if (processingImages) return setSaveStatus('图片正在处理，请稍候再保存。', 'error');
         preparingSave = true;
-        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
+        document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = true; });
         await persistEditorDraft();
         preparingSave = false;
-        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = false; });
+        document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = false; });
         if (!dataLoaded || !databaseConnected) return setSaveStatus('尚未连接到服务器，暂未同步；请查看本机草稿状态，连接恢复后再保存。', 'error');
         const rows = Array.from(document.querySelectorAll('#admin-list .admin-item'));
         const drafts = [];
@@ -1229,31 +1264,33 @@
                 originalIndex: originalIndex === '' || originalIndex == null ? null : Number(originalIndex) });
         }
         const maxVotes = Number(document.getElementById('maxVoteInput').value);
-        const overlapping = SparkNumbers.overlap(drafts);
+        const selectedMode = document.getElementById('voteMode').value;
+        const voteMode = ['image', 'number'].includes(selectedMode) ? selectedMode : 'auto';
+        const overlapping = voteMode === 'image' ? '' : SparkNumbers.overlap(drafts);
         if (overlapping) return setSaveStatus(`${overlapping}，请修正名称后保存。编辑内容已保留。`, 'error');
         if (!Number.isInteger(maxVotes) || maxVotes < 1 || maxVotes > 99) return setSaveStatus('每组限投票数须为 1 至 99 的整数。', 'error');
         if (new TextEncoder().encode(JSON.stringify(drafts)).length > 15 * 1024 * 1024) return setSaveStatus('图片总量超过单次保存容量，请缩小图片后再保存。编辑内容已保留。', 'error');
         saving = true;
-        document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
+        document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = true; });
         setSaveStatus('正在保存，等待服务器确认…');
         const noticeTimer = setTimeout(() => setSaveStatus('服务器尚未确认，请保留当前页面，连接恢复后会继续保存。'), 15000);
         try {
             const baselineRound = JSON.parse(editorBaseline).round;
-            const submittedSignature = metadataSignature({round:baselineRound,maxVotes,items:drafts});
+            const submittedSignature = metadataSignature({round:baselineRound,maxVotes,voteMode,items:drafts});
             const result = await db.ref('sparkVote').transaction(server => {
                 const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
                 if (metadataSignature(latest) === submittedSignature) return latest;
                 if (metadataSignature(latest) !== editorBaseline) return;
                 const items = drafts.map(draft => ({ ...(draft.originalIndex == null ? {} : latest.items?.[draft.originalIndex]), name: draft.name, group: draft.group, url: draft.url,
                     votes: draft.originalIndex == null ? 0 : (latest.items?.[draft.originalIndex]?.votes || 0) }));
-                return { ...latest, items, maxVotes };
+                return { ...latest, items, maxVotes, voteMode: voteMode === 'auto' ? null : voteMode };
             }, undefined, false);
             if (!result.committed) throw new Error('其他管理员已修改选项，请先保留当前编辑内容，核对最新数据后再操作');
             currentData = result.snapshot.val() || { items: [] };
             globalMaxVotes = currentData.maxVotes || 1;
             adminDirty = false;
             renderAdminView(currentData.items || []);
-            document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = true; });
+            document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = true; });
             renderUserView(currentData.items || []);
             updateDashboard(currentData);
             refreshLocalSuggestions();
@@ -1265,7 +1302,7 @@
         } finally {
             clearTimeout(noticeTimer);
             saving = false;
-            document.querySelectorAll('#admin-panel input, #admin-panel button').forEach(control => { control.disabled = false; });
+            document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = false; });
         }
     }
 </script>
