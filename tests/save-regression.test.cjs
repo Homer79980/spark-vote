@@ -46,12 +46,42 @@ function row({name='', url='data:image/jpeg;base64,AA==', group='测试组',orig
     return { dataset:{originalIndex}, querySelector:s=>fields[s] ?? null };
 }
 
+test('a 20 MiB gallery survives a concurrent ballot and an independent read after Save', async () => {
+    const gallery = Array.from({length:5}, (_,i)=>row({name:'图'+i,url:'data:image/webp;base64,'+'A'.repeat(4*1024*1024)}));
+    const app = setup(gallery);
+    let remote={round:0,maxVotes:1}, version=1, attempts=0;
+    app.context.fetch=async (_url,options={})=>{
+        if (options.method!=='PUT') return Response.json(remote,{headers:{ETag:String(version)}});
+        attempts++;
+        if (attempts===1) { remote.imageBallots={r0:{person:{sample:true}}}; version++; }
+        if (options.headers['if-match']!==String(version)) return Response.json(remote,{status:412,headers:{ETag:String(version)}});
+        remote=JSON.parse(options.body); version++;
+        return new Response(null,{status:204});
+    };
+    await app.context.saveAll();
+    assert.match(app.elements.get('save-status').textContent,/保存成功/);
+    const refreshed=await (await app.context.fetch('')).json();
+    assert.equal(attempts,2);
+    assert.equal(refreshed.items.length,5);
+    assert.equal(refreshed.items[4].url,gallery[4].querySelector('.edit-url').value);
+    assert.deepEqual(refreshed.imageBallots,{r0:{person:{sample:true}}});
+});
+
 test('an uploaded image with no name must not be silently discarded by Save', async () => {
     const app = setup([row()]);
     await app.context.saveAll();
     assert.ok(app.writes.length === 0 || app.writes[0].items?.length === 1,
         'Save wrote an empty item list and discarded the uploaded image');
     if (!app.writes.length) assert.ok(app.alerts.length || /名称|未命名/.test(app.elements.get('save-status')?.textContent || ''), 'validation must tell the user why saving stopped');
+});
+
+test('above 64 MiB the editor displays the limit and keeps the pending rows without any remote write',async()=>{
+    const url='data:image/webp;base64,'+'A'.repeat(4*1024*1024);
+    const app=setup(Array.from({length:16},(_,i)=>row({name:'图'+i,url})));
+    await app.context.saveAll();
+    assert.equal(app.writes.length,0);
+    assert.match(app.elements.get('gallery-capacity').textContent,/超出上限/);
+    assert.match(app.elements.get('save-status').textContent,/64 MiB.*已保留/);
 });
 
 test('saving during image decoding must not throw or discard the row', async () => {

@@ -215,6 +215,7 @@
                 <input id="batch-file-input" type="file" accept="image/*" multiple hidden onchange="handleBatchSelect(event)">
             </div>
             <progress id="batch-progress" value="0" max="1" hidden></progress>
+            <p id="gallery-capacity">图片容量：0 / 64 MiB</p>
             <p id="batch-status" role="status" aria-live="polite">图片添加完成后会自动保存，请等待“保存成功”。</p>
             <p id="upload-save-status" class="save-status" role="status" aria-live="polite"></p>
             <p id="local-draft-status" class="save-status" role="status" aria-live="polite"></p>
@@ -385,6 +386,7 @@
                 start:row.querySelector('.range-start')?.value||'',end:row.querySelector('.range-end')?.value||'',
                 url: row.querySelector('.edit-url')?.value || '', originalIndex: row.dataset.originalIndex ?? ''
             })) };
+        showGalleryCapacity(draft.rows);
         try {
             await writeLocalState('draft', draft);
             if (revision === draftRevision) {
@@ -414,6 +416,7 @@
         document.getElementById('batch-group').value = pendingDraft.group || '';
         adminDirty = true;
         refreshLocalSuggestions();
+        showGalleryCapacity(pendingDraft.rows);
         setSaveStatus('已恢复上次未同步的草稿，请确认后点击“保存更新”。');
         document.getElementById('local-draft-status').textContent = '本机草稿已恢复，图片仍保留。';
         return true;
@@ -1042,6 +1045,7 @@
         list.innerHTML = '';
         items.forEach((item, index) => list.appendChild(createAdminRow(item, index)));
         editorBaseline = metadataSignature(currentData);
+        showGalleryCapacity(items);
     }
     function addNewRow() {
         if (saving || preparingSave) return;
@@ -1126,12 +1130,21 @@
         link.click();
     }
     
-    function resetAllVotes() {
+    async function resetAllVotes() {
         const c = Math.floor(1000+Math.random()*9000);
-        if(prompt(`验证码:${c}`) == c) {
-            const ni = (currentData.items||[]).map(i=>({...i, votes:0}));
-            db.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
-        }
+        if(prompt(`验证码:${c}`) != c) return;
+        if (!dataLoaded || !databaseConnected || saving || preparingSave || processingImages) return setSaveStatus('请等待连接或当前操作完成。','error');
+        const round=currentData.round||0;
+        saving=true;
+        try {
+            const result=await galleryTransaction(server => {
+                if (!server || (server.round||0)!==round) return;
+                return {...server,items:(server.items||[]).map(i=>({...i,votes:0})),headcount:0,round:round+1};
+            }, galleryBytes(currentData.items));
+            if (!result.committed) throw Error('轮次已变化，请核对后再操作');
+            alert('已重置');
+        } catch(error) {setSaveStatus('重置失败：'+error.message,'error');}
+        finally {saving=false;}
     }
     async function deleteAllItems() {
         if (saving || preparingSave || processingImages) return setSaveStatus('请等待当前操作完成。', 'error');
@@ -1283,6 +1296,50 @@
         });
     }
 
+    const MIB = 1024 * 1024, GALLERY_LIMIT = 64 * MIB, SDK_THRESHOLD = 12 * MIB;
+    function galleryBytes(items) {
+        return (items || []).reduce((sum,item) => {
+            const url=item?.url || '';
+            return sum + (url.startsWith('data:') ? url.length : new TextEncoder().encode(url).length);
+        },0);
+    }
+    function showGalleryCapacity(items) {
+        const bytes=galleryBytes(items), field=document.getElementById('gallery-capacity');
+        field.textContent='图片容量：'+(bytes/MIB).toFixed(2)+' / 64 MiB'+(bytes>GALLERY_LIMIT?'（超出上限）':'');
+        field.className=bytes>GALLERY_LIMIT?'save-status error':'';
+    }
+    async function galleryTransaction(update, imageBytes) {
+        // Keep small writes on the SDK. For larger writes use the REST limit and compare-and-swap.
+        if (imageBytes < SDK_THRESHOLD && galleryBytes(currentData.items) < SDK_THRESHOLD) {
+            let useRest=false;
+            const result=await db.ref('sparkVote').transaction(server=>{
+                useRest=false;
+                const next=update(server);
+                if (next!==undefined && new Blob([JSON.stringify(next)]).size >= SDK_THRESHOLD) { useRest=true; return; }
+                return next;
+            },undefined,false);
+            if (!useRest) return result;
+        }
+        const endpoint=firebaseConfig.databaseURL.replace(/\/$/,'')+'/sparkVote.json';
+        let response=await fetch(endpoint,{cache:'no-store',headers:{'X-Firebase-ETag':'true'}});
+        for (let attempt=0;attempt<4;attempt++) {
+            if (!response.ok && response.status!==412) throw Error('服务器读取失败（HTTP '+response.status+'）');
+            const tag=response.headers.get('ETag');
+            if (!tag) throw Error('无法核对服务器版本，请重试');
+            const server=await response.json(), next=update(server);
+            if (next===undefined) return {committed:false};
+            if (next===server) return {committed:true,snapshot:{val:()=>server}};
+            response=await fetch(endpoint,{method:'PUT',headers:{'Content-Type':'application/json','if-match':tag},body:JSON.stringify(next)});
+            if (response.ok) {
+                // A successful conditional PUT echoes the uploaded gallery. The status already confirms it.
+                response.body?.cancel().catch(()=>{});
+                return {committed:true,snapshot:{val:()=>next}};
+            }
+            if (response.status!==412) throw Error('服务器保存失败（HTTP '+response.status+'）');
+        }
+        throw Error('投票数据持续变化，请再次点击保存更新');
+    }
+
     async function saveAll(mergeNewRound = false) {
         if (saving || preparingSave) return;
         document.getElementById('merge-draft-button').hidden=true;
@@ -1318,7 +1375,8 @@
         const overlapping = voteMode === 'image' ? '' : SparkNumbers.overlap(drafts);
         if (overlapping) return setSaveStatus(`${overlapping}，请修正名称后保存。编辑内容已保留。`, 'error');
         if (!Number.isInteger(maxVotes) || maxVotes < 1 || maxVotes > 99) return setSaveStatus('每组限投票数须为 1 至 99 的整数。', 'error');
-        if (new TextEncoder().encode(JSON.stringify(drafts)).length > 15 * 1024 * 1024) return setSaveStatus('图片总量超过单次保存容量，请缩小图片后再保存。编辑内容已保留。', 'error');
+        const imageBytes=galleryBytes(drafts);
+        if (imageBytes > GALLERY_LIMIT) return setSaveStatus('图片总容量超过 64 MiB，请缩小图片后再保存。编辑内容已保留。', 'error');
         saving = true;
         document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = true; });
         setSaveStatus('正在保存，等待服务器确认…');
@@ -1328,7 +1386,7 @@
             const baselineRound = baseline.round;
             const submittedSignature = metadataSignature({round:baselineRound,maxVotes,voteMode,items:drafts});
             let conflict='选项已变化，请核对后保存。',canMerge=false;
-            const result = await db.ref('sparkVote').transaction(server => {
+            const result = await galleryTransaction(server => {
                 canMerge=false;
                 const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
                 if (metadataSignature(latest) === submittedSignature) return latest;
@@ -1351,7 +1409,7 @@
                     if(mergedMode==='number' && items.some(i=>!SparkNumbers.range(i.name))) {conflict='线上采用编号投票，请先为图片补全编号范围。';return;}
                     const overlap=mergedMode!=='image' && SparkNumbers.overlap(items);
                     if(overlap) {conflict=overlap+'，请先修改草稿中的范围。';return;}
-                    if(new TextEncoder().encode(JSON.stringify(items)).length>15*1024*1024) {conflict='合并后图片总量超过容量，请缩小图片后再保存。';return;}
+                    if(galleryBytes(items)>GALLERY_LIMIT) {conflict='合并后图片总量超过 64 MiB，请缩小图片后再保存。';return;}
                     if(keepSettings && !mergeNewRound) {
                         conflict=changedRound?'其他管理员已开启新一轮。':('线上已修改'+[modeConflict?'投票方式':'',limitConflict?'每组限投票数':''].filter(Boolean).join('和')+'。');
                         canMerge=true;return;
@@ -1361,7 +1419,7 @@
                 const items = drafts.map(draft => ({ ...(draft.originalIndex == null ? {} : latest.items?.[draft.originalIndex]), imageId:draft.originalIndex==null?crypto.randomUUID():SparkImages.id(latest.items[draft.originalIndex]), name: draft.name, group: draft.group, url: draft.url,
                     votes: draft.originalIndex == null ? 0 : (latest.items?.[draft.originalIndex]?.votes || 0) }));
                 return { ...latest, items, maxVotes, voteMode: voteMode === 'auto' ? null : voteMode };
-            }, undefined, false);
+            }, imageBytes);
             if (!result.committed) {
                 document.getElementById('merge-draft-button').hidden=!canMerge;
                 throw Error(conflict);
