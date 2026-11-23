@@ -66,6 +66,7 @@ async function main() {
         await page.locator('#number-vote-panel [data-number-submit]').click();
         assert.match(await page.locator('#number-vote-status').innerText(),/已经投过/);
         assert.equal((await ballot()).n2358,4);
+        await page.locator('#my-number-details summary').click();
         assert.equal(await page.locator('[data-number-cancel="2358"]').innerText(),'撤销');
         await page.locator('[data-number-cancel="2358"]').click();
         await page.waitForFunction(()=>!numberSubmitting&&document.getElementById('number-vote-status').textContent.includes('已撤销'));

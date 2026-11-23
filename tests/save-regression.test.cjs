@@ -28,7 +28,7 @@ function setup(rows = [], initialData = {items:[],round:0,maxVotes:1}) {
         update(payload) { writes.push(payload); return Promise.resolve(); },
         transaction(fn) { if (server.error) return Promise.reject(server.error); const value = fn(server.data); if (value === undefined) return Promise.resolve({committed:false}); writes.push(value); server.data=value; return Promise.resolve({committed:true,snapshot:{val:()=>value}}); }
     }; } };
-    const context = vm.createContext({ document, console, Blob, TextEncoder, URL, Promise, SparkNumbers: require('../number-voting.js'),
+    const context = vm.createContext({ document, console, Blob, TextEncoder, URL, Promise, crypto:require('node:crypto').webcrypto, SparkImages:require('../image-voting.js'), SparkNumbers: require('../number-voting.js'),
         firebase: { initializeApp() {}, database: () => db },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         window: { addEventListener() {} }, setTimeout: () => 1, clearTimeout() {},
@@ -117,8 +117,11 @@ test('simultaneous edits to the same setting still refuse to overwrite', async (
     const app = setup([row({name:'图片'})]);
     app.elements.get('maxVoteInput').value='3';
     app.server.data = {items:[],round:0,maxVotes:2};
-    await app.context.saveAll(true);
+    await app.context.saveAll();
     assert.equal(app.writes.length,0);
+    assert.match(app.elements.get('save-status').textContent,/每组限投票数/);
+    await app.context.saveAll(true);
+    assert.equal(app.server.data.items.length,1);
     assert.equal(app.server.data.maxVotes,2);
 });
 
@@ -126,7 +129,7 @@ test('merge does not duplicate a previously committed image', async () => {
     const app = setup([row({name:'图片'})]);
     app.server.data = {items:[{name:'图片',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:7}],round:0,maxVotes:2};
     await app.context.saveAll(true);
-    assert.equal(app.writes.length,0);
+    assert.equal(app.server.data.items.length,1);
     assert.equal(app.server.data.items[0].votes,7);
 });
 
@@ -170,6 +173,18 @@ test('saving image edits keeps numbered ballots that arrived while editing', asy
     assert.equal(app.writes[0].numberBallots.r1.archived.n2301,true);
     assert.equal(app.writes[0].numberBallotsV2.r0.voter.n2358,4);
     assert.equal(app.writes[0].items[0].votes,3);
+});
+
+test('number uploads require a usable range and accept manual start and end without another upload', async () => {
+    const r=row({name:'概念图'});const orig=r.querySelector;
+    const fields={'.range-start':{value:''},'.range-end':{value:''}};
+    r.querySelector=s=>fields[s]||orig(s);
+    const app=setup([r]);app.elements.get('voteMode').value='number';
+    await app.context.saveAll();assert.equal(app.writes.length,0);
+    assert.match(app.elements.get('save-status').textContent,/概念图.*编号范围/);
+    fields['.range-start'].value='101';fields['.range-end'].value='105';await app.context.saveAll();
+    assert.equal(app.server.data.items[0].name,'概念图_101-105');
+    assert.equal(app.context.SparkNumbers.find(app.server.data.items,103).index,0);
 });
 
 test('overlapping numbered uploads fail validation without replacing server items', async () => {

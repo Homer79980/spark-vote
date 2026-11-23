@@ -10,9 +10,9 @@ function startServer(port = 0) {
                 res.setHeader('Content-Type','text/javascript; charset=utf-8');
                 res.end(fs.readFileSync(path.join(__dirname,'browser-fixture.js')));return;
             }
-            if(req.url.split('?')[0] === '/number-voting.js') {
+            if(['/number-voting.js','/image-voting.js'].includes(req.url.split('?')[0])) {
                 res.setHeader('Content-Type','text/javascript; charset=utf-8');
-                res.end(fs.readFileSync(path.join(__dirname,'..','number-voting.js')));return;
+                res.end(fs.readFileSync(path.join(__dirname,'..',req.url.split('?')[0].slice(1))));return;
             }
             res.setHeader('Content-Type','text/html; charset=utf-8');
             const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8')

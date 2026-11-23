@@ -13,7 +13,7 @@
         on(event,fn){listeners[path]=fn;if(path === '.info/connected' || connected)queueMicrotask(()=>fn(snapshot(path === '.info/connected' ? connected : server)));},
         async transaction(update){
             if (rejectNext) {rejectNext=false;throw new Error('PERMISSION_DENIED (test)');}
-            if(/^sparkVote\/numberBallots(?:V2)?\//.test(path)) {
+            if(/^sparkVote\/(?:numberBallots(?:V2)?|imageBallots)\//.test(path)) {
                 return navigator.locks.request('spark-number-test-server',async () => {
                     const delay = Number(new URLSearchParams(location.search).get('voteDelay')) || 0;
                     if (delay) await new Promise(resolve => setTimeout(resolve,delay));
