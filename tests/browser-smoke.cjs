@@ -3,8 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {startServer} = require('./fixture-server.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_CORE_PATH || 'playwright-core');
-const html = fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
-const password = html.match(/prompt\("验证:"\) === "([^"]+)"/)[1];
+// Administrative login is provided by the isolated Firebase fixture.
 const image = {name:'透明示例.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')};
 async function main(){
     const server=await startServer();
@@ -13,7 +12,7 @@ async function main(){
         browser=await chromium.launch({headless:true,channel:'msedge'});
         const page=await browser.newPage({viewport:{width:1280,height:900}});
         const errors=[];page.on('pageerror',e=>errors.push(e.message));
-        page.on('dialog',dialog=>dialog.type()==='prompt'?dialog.accept(password):dialog.dismiss());
+        page.on('dialog',dialog=>dialog.type()==='prompt'?dialog.accept():dialog.dismiss());
         await page.goto(`http://127.0.0.1:${server.address().port}`);
         await page.locator('.footer').click();
         await page.getByRole('button',{name:'+ 新增',exact:true}).click();

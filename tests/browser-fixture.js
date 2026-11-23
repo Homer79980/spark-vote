@@ -40,6 +40,16 @@
         async update(payload){Object.assign(server,payload);publish();},
         async set(){throw new Error('Destructive operations are disabled in this test fixture');}
     };}})};
+    const fixtureDb=window.firebase.database(), voterAuth={
+        get currentUser(){const uid=localStorage.getItem('spark_number_voter_v1');return uid?{uid}:null;},
+        onAuthStateChanged(fn){queueMicrotask(()=>fn(this.currentUser));return ()=>{};},
+        async signInAnonymously(){let uid=this.currentUser?.uid||crypto.randomUUID();localStorage.setItem('spark_number_voter_v1',uid);return {user:{uid}};}
+    };
+    window.firebase.initializeApp=(_cfg,name)=>name?{
+        auth:()=>({signInWithPopup:async()=>({user:{uid:'fixture-admin'}}),signOut:async()=>{}}),
+        database:()=>({ref:path=>path==='sparkVoteAdmins/fixture-admin'?{once:async()=>snapshot(true)}:fixtureDb.ref(path)})
+    }:{auth:()=>voterAuth,database:()=>fixtureDb};
+    window.firebase.auth={GoogleAuthProvider:class{setCustomParameters(){}}};
     document.addEventListener('DOMContentLoaded',()=>{
         const panel=document.createElement('div'); panel.id='test-controls';
         panel.style='padding:10px;background:#fff3cd;position:relative;z-index:10002;display:flex;gap:8px;flex-wrap:wrap';

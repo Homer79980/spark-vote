@@ -294,14 +294,16 @@
     <button class="modal-nav next" onclick="nextImage(event)">&#10095;</button>
 </div>
 
+<script src="firebase-web-config.js"></script>
+<script src="access.js"></script>
 <script src="image-voting.js?v=1"></script>
 <script src="number-voting.js?v=20261102-4"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
 <script>
-    const firebaseConfig = { databaseURL: "https://playa-dc7ae-default-rtdb.firebaseio.com/" };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+    const access=SparkAccess.open(firebase,window.SPARK_FIREBASE_WEB);
+    const db=access.db;
 
     let currentData = { items: [], headcount: 0 }; 
     let isAdmin = false;
@@ -439,7 +441,8 @@
         }
     }
 
-    const localStateReady = loadLocalState();
+    const localStateReady=loadLocalState();
+    access.voter().then(()=>{renderUserView(currentData.items||[]);}).catch(()=>{document.getElementById('sync-status').textContent='投票身份暂时不可用，提交时会重试。';});
 
     function metadataSignature(data) {
         return JSON.stringify({ round: data.round || 0, maxVotes: data.maxVotes || 1, voteMode: data.voteMode || 'auto',
@@ -515,21 +518,7 @@
 
     function numberRoundKey() { return `r${currentData.round || 0}`; }
     function numberBallots() { return SparkNumbers.effectiveBallots(currentData, numberRoundKey()); }
-    function numberVoterId(create = false) {
-        try {
-            let id = localStorage.getItem('spark_number_voter_v1');
-            if (!/^[a-f0-9-]{36}$/.test(id || '')) {
-                if (!create) return '';
-                id = crypto.randomUUID();
-                localStorage.setItem('spark_number_voter_v1', id);
-                if (localStorage.getItem('spark_number_voter_v1') !== id) throw new Error('无法保留投票身份');
-            }
-            return id;
-        } catch (error) {
-            if (create) throw new Error('浏览器无法保存投票身份，请允许网站存储后再投票。');
-            return '';
-        }
-    }
+    function numberVoterId() {return access.uid();}
     function myNumberChoices() { return SparkNumbers.choices(numberBallots()[numberVoterId()]); }
     function myNumberBallot() { return numberBallots()[numberVoterId()] || {}; }
     function myNumberVotes() { return SparkNumbers.totalVotes(myNumberBallot()); }
@@ -623,7 +612,7 @@
         renderNumberVoting();
         let voter;
         try {
-            voter = navigator.locks ? await navigator.locks.request('spark-number-voter-identity', () => numberVoterId(true)) : numberVoterId(true);
+            voter=await access.voter();
         } catch (error) {
             numberSubmitting = false;
             setNumberVoteStatus(error.message, 'error');
@@ -758,7 +747,7 @@
         if (remove && !confirm('撤销这张图的一票？')) return;
         imageSubmitting=true;showToast('正在提交…','⏳');
         try {
-            const voter=navigator.locks ? await navigator.locks.request('spark-number-voter-identity',()=>numberVoterId(true)) : numberVoterId(true);
+            const voter=await access.voter();
             let reason='';
             const ref=db.ref('sparkVote/imageBallots/'+round+'/'+voter);
             const result=await ref.transaction(raw=>{
@@ -966,7 +955,8 @@
     async function toggleAdmin() {
         await localStateReady;
         if (!isAdmin) {
-            if (prompt("验证:") === "123456") { 
+            try { await access.login(); } catch(e) { showToast(e.message||'登录未完成','!');return; }
+            {
                 isAdmin = true; 
                 document.getElementById('admin-panel').style.display = 'block'; 
                 if (!adminDirty) renderAdminView(currentData.items || []);
@@ -978,7 +968,7 @@
                 updateDashboard(currentData);
             }
         } else { 
-            isAdmin = false; 
+            isAdmin = false; await access.logout();
             document.getElementById('admin-panel').style.display = 'none';
             renderUserView(currentData.items || []);
         }
@@ -1130,7 +1120,7 @@
         const c = Math.floor(1000+Math.random()*9000);
         if(prompt(`验证码:${c}`) == c) {
             const ni = (currentData.items||[]).map(i=>({...i, votes:0}));
-            db.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
+            access.adminDb.ref('sparkVote').update({ items: ni, headcount: 0, round: (currentData.round||0)+1 }).then(()=>alert("已重置"));
         }
     }
     async function deleteAllItems() {
@@ -1142,7 +1132,7 @@
         setSaveStatus('正在删除，等待服务器确认…');
         try {
             const expected = metadataSignature(currentData);
-            const result = await db.ref('sparkVote').transaction(server => {
+            const result = await access.adminDb.ref('sparkVote').transaction(server => {
                 if (!server || metadataSignature(server) !== expected) return;
                 return {...server, items: [], headcount: 0, numberBallots: null, numberBallotsV2: null, imageBallots:null, round: (server.round || 0) + 1};
             }, undefined, false);
@@ -1328,7 +1318,7 @@
             const baselineRound = baseline.round;
             const submittedSignature = metadataSignature({round:baselineRound,maxVotes,voteMode,items:drafts});
             let conflict='选项已变化，请核对后保存。',canMerge=false;
-            const result = await db.ref('sparkVote').transaction(server => {
+            const result = await access.adminDb.ref('sparkVote').transaction(server => {
                 canMerge=false;
                 const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
                 if (metadataSignature(latest) === submittedSignature) return latest;

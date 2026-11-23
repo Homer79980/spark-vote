@@ -10,7 +10,8 @@ function startServer(port = 0) {
                 res.setHeader('Content-Type','text/javascript; charset=utf-8');
                 res.end(fs.readFileSync(path.join(__dirname,'browser-fixture.js')));return;
             }
-            if(['/number-voting.js','/image-voting.js'].includes(req.url.split('?')[0])) {
+            if(req.url==='/firebase-web-config.js'){res.setHeader('Content-Type','text/javascript');res.end('window.SPARK_FIREBASE_WEB={apiKey:"fixture",projectId:"playa-dc7ae"};');return;}
+            if(['/number-voting.js','/image-voting.js','/access.js','/firebase-web-config.js'].includes(req.url.split('?')[0])) {
                 res.setHeader('Content-Type','text/javascript; charset=utf-8');
                 res.end(fs.readFileSync(path.join(__dirname,'..',req.url.split('?')[0].slice(1))));return;
             }

@@ -29,7 +29,7 @@ function setup(rows = [], initialData = {items:[],round:0,maxVotes:1}) {
         transaction(fn) { if (server.error) return Promise.reject(server.error); const value = fn(server.data); if (value === undefined) return Promise.resolve({committed:false}); writes.push(value); server.data=value; return Promise.resolve({committed:true,snapshot:{val:()=>value}}); }
     }; } };
     const context = vm.createContext({ document, console, Blob, TextEncoder, URL, Promise, crypto:require('node:crypto').webcrypto, SparkImages:require('../image-voting.js'), SparkNumbers: require('../number-voting.js'),
-        firebase: { initializeApp() {}, database: () => db },
+        SparkAccess:{open:()=>({db,adminDb:db,uid:()=>'',voter:async()=>null})},firebase:{},
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         window: { addEventListener() {} }, setTimeout: () => 1, clearTimeout() {},
         alert: message => alerts.push(message), confirm: () => true });

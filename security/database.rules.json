@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "sparkVoteAdmins": {
+      "$uid": { ".read": "auth != null && auth.uid === $uid" }
+    },
+    "sparkVote": {
+      ".read": true,
+      ".write": "auth != null && auth.token.firebase.sign_in_provider === 'google.com' && root.child('sparkVoteAdmins').child(auth.uid).val() === true",
+      "numberBallotsV2": {
+        "$round": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && $round === ('r' + (root.child('sparkVote/round').exists() ? root.child('sparkVote/round').val() : 0)) && root.child('sparkVote/voteMode').val() !== 'image' && newData.hasChild('_format')",
+            "_format": { ".validate": "newData.val() === 2" },
+            "$choice": { ".validate": "$choice.matches(/^n[1-9][0-9]{0,6}$/) && newData.val() === 1" }
+          }
+        }
+      },
+      "imageBallots": {
+        "$round": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && $round === ('r' + (root.child('sparkVote/round').exists() ? root.child('sparkVote/round').val() : 0)) && root.child('sparkVote/voteMode').val() !== 'number' && newData.hasChild('_newParticipant')",
+            "_newParticipant": { ".validate": "newData.isBoolean() && (!data.exists() || data.val() === newData.val())" },
+            "$image": { ".validate": "$image.matches(/^(old_[a-z0-9]+_[a-z0-9]+|[a-f0-9-]{36})$/) && newData.val() === true" }
+          }
+        }
+      }
+    }
+  }
+}
