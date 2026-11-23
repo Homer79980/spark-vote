@@ -453,7 +453,9 @@
         return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    document.getElementById('admin-list').addEventListener('input', markAdminDirty);
+    document.getElementById('admin-list').addEventListener('input', event => {
+        if (event.target.type !== 'file') markAdminDirty();
+    });
     document.getElementById('maxVoteInput').addEventListener('input', markAdminDirty);
     document.getElementById('voteMode').addEventListener('change', () => {
         markAdminDirty();
@@ -1183,11 +1185,8 @@
     }
     function handleFileSelect(event, zone) { return handleRowFiles(Array.from(event.target.files), zone); }
     async function handleRowFiles(files, zone) {
-        if (!files.length || saving || preparingSave || processingImages) return;
         const group = zone.closest('.admin-item').querySelector('.edit-group').value.trim() || '默认分组';
-        const ready = await processFile(files[0], zone);
-        if (files.length > 1) await importImageFiles(files.slice(1), group);
-        else if (ready) await saveAll();
+        return importImageFiles(files, group, zone);
     }
     function handleBatchDrop(event) {
         event.preventDefault();
@@ -1200,72 +1199,62 @@
         await importImageFiles(files);
         event.target.value = '';
     }
-    async function importImageFiles(files, group) {
+    async function importImageFiles(files, group, zone = null) {
         if (!files.length) return;
         const status = document.getElementById('batch-status');
         if (saving || preparingSave || processingImages || batchImporting) { status.textContent = '正在处理上一批图片或保存，请稍候再添加。'; return; }
         group = group || document.getElementById('batch-group').value.trim() || '默认分组';
         batchImporting = true;
         processingImages++;
-        markAdminDirty();
+        zone?.classList.add('processing');
         document.getElementById('save-button').disabled = true;
         document.getElementById('batch-select-button').disabled = true;
         const progress = document.getElementById('batch-progress');
         progress.hidden = false;
         progress.max = files.length;
         progress.value = 0;
-        let added = 0;
+        const rows=Array.from(document.querySelectorAll('#admin-list .admin-item'));
+        let used=rows.reduce((sum,row)=>sum+imageBytesOf(row.querySelector('.edit-url')?.value),0);
+        const previous=zone?.querySelector('.edit-url').value || '';
+        let added = 0, replaced = false;
         const failures = [];
         try {
             for (const [index, file] of files.entries()) {
                 status.textContent = `正在处理 ${index + 1} / ${files.length}：${file.name}`;
                 try {
                     const url = await prepareImage(file);
+                    const replace = zone && !replaced && (index===0 || !previous);
+                    const nextUsed=used+imageBytesOf(url)-(replace?imageBytesOf(previous):0);
+                    if (nextUsed>GALLERY_LIMIT) throw new Error('剩余容量不足');
                     const name = file.name.replace(/\.[^.]+$/, '') || `图片 ${index + 1}`;
-                    document.getElementById('admin-list').appendChild(createAdminRow({name, url, group}, null));
-                    added++;
+                    if (replace) {
+                        setImagePreview(zone,url);
+                        const field=zone.closest('.admin-item').querySelector('.edit-name');
+                        if (!field.value.trim()) field.value=name;
+                        replaced=true;
+                    } else {
+                        document.getElementById('admin-list').appendChild(createAdminRow({name, url, group}, null));
+                        added++;
+                    }
+                    used=nextUsed;
+                    adminDirty=true;
                     await persistEditorDraft();
                 } catch (error) { failures.push(`${file.name}（${error.message}）`); }
                 progress.value = index + 1;
             }
             refreshLocalSuggestions();
-            status.textContent = `已添加 ${added} 张图片${failures.length ? `，${failures.length} 个文件未添加：${failures.join('；')}` : ''}。`;
-            setSaveStatus(added ? `已添加 ${added} 个选项，正在自动保存…` : '没有添加新图片，请查看批量导入提示。', added ? '' : 'error');
+            const summary=[replaced?(previous?'已替换 1 张图片':'已填入 1 张图片'):'',added || !replaced?`已添加 ${added} 张图片`:''].filter(Boolean).join('，');
+            status.textContent = summary+(failures.length?`，${failures.length} 个文件未添加：${failures.join('；')}`:'')+'。';
+            setSaveStatus(added || replaced ? '正在自动保存，等待服务器确认…' : (zone && previous?'原图片已保留。':'没有添加新图片。')+'请查看批量导入提示。', added || replaced ? '' : 'error');
         } finally {
             batchImporting = false;
             processingImages--;
             progress.hidden = true;
+            if (zone) {zone.classList.remove('processing');zone.querySelector('input[type="file"]').value='';}
             document.getElementById('batch-select-button').disabled = false;
             document.getElementById('save-button').disabled = saving || processingImages > 0;
         }
-        if (added) await saveAll();
-    }
-    
-    async function processFile(file, zone) {
-        if (saving || preparingSave || zone.dataset.processing) return false;
-        processingImages++;
-        zone.dataset.processing = 'true';
-        zone.classList.add('processing');
-        document.getElementById('save-button').disabled = true;
-        markAdminDirty();
-        try {
-            const url = await prepareImage(file);
-            setImagePreview(zone, url);
-            const name = zone.closest('.admin-item').querySelector('.edit-name');
-            if (!name.value.trim()) name.value = file.name.replace(/\.[^.]+$/, '') || '未命名图片';
-            await persistEditorDraft();
-            setSaveStatus('图片已就绪，正在自动保存…');
-            return true;
-        } catch (error) {
-            setSaveStatus(`${file.name}：${error.message}。原图片已保留。`, 'error');
-            return false;
-        } finally {
-            processingImages--;
-            delete zone.dataset.processing;
-            zone.classList.remove('processing');
-            document.getElementById('save-button').disabled = saving || processingImages > 0;
-            zone.querySelector('input[type="file"]').value = '';
-        }
+        if (added || replaced) await saveAll();
     }
 
     function prepareImage(file) {
@@ -1297,11 +1286,11 @@
     }
 
     const MIB = 1024 * 1024, GALLERY_LIMIT = 64 * MIB, SDK_THRESHOLD = 12 * MIB;
+    function imageBytesOf(url) {
+        return !url ? 0 : url.startsWith('data:') ? url.length : new TextEncoder().encode(url).length;
+    }
     function galleryBytes(items) {
-        return (items || []).reduce((sum,item) => {
-            const url=item?.url || '';
-            return sum + (url.startsWith('data:') ? url.length : new TextEncoder().encode(url).length);
-        },0);
+        return (items || []).reduce((sum,item) => sum+imageBytesOf(item?.url),0);
     }
     function showGalleryCapacity(items) {
         const bytes=galleryBytes(items), field=document.getElementById('gallery-capacity');
