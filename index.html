@@ -196,11 +196,9 @@
         <div class="config-bar">
             <label for="voteMode">投票方式：</label>
             <select id="voteMode"><option value="auto">兼容原有方式</option><option value="image">图片点赞</option><option value="number">批量编号投票</option></select>
-            <span>⚙️ <b>普通单图规则：</b>每组每人限投</span>
-            <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;">
-            <span>票</span>
+            <span id="image-rule">⚙️ <b>普通单图规则：</b>每组每人限投 <input type="number" id="maxVoteInput" min="1" max="99" value="1" style="width: 40px; text-align:center;"> 票</span>
         </div>
-        <p class="number-rule">编号总览图：所有图片合计，每人最多 <b>500 票</b>。每人每个编号只能投 1 票。</p>
+        <p class="number-rule" id="number-rule">编号总览图：所有图片合计，每人最多 <b>500 票</b>。每人每个编号只能投 1 票。</p>
         <datalist id="group-suggestions"></datalist>
         <section id="batch-upload" class="batch-upload" aria-label="批量添加图片"
             ondragover="event.preventDefault(); this.classList.add('drag-over')"
@@ -225,6 +223,7 @@
             <button onclick="exportData()" style="background:#00b894; color:white; flex:1.5; padding:10px;">📥 导出Excel</button>
         </div>
         <p id="save-status" class="save-status" role="status" aria-live="polite">正在连接，请稍候…</p>
+        <button id="merge-draft-button" type="button" hidden onclick="saveAll(true)">把草稿中新添加的图片合并到最新一轮</button>
         <div style="margin-top:20px; border-top:1px dashed #ccc; padding-top:15px; display:flex; gap:10px;">
             <button onclick="resetAllVotes()" style="color:#d63031; background:white; border:1px solid #fab1a0; flex:1; font-size:12px;">⚠️ 清空所有 (含人数)</button>
             <button onclick="deleteAllItems()" style="color:#d63031; background:white; border:1px solid #fab1a0; flex:1; font-size:12px;">🗑️ 删除所有</button>
@@ -535,6 +534,11 @@
         }
     }
     function displayVoteMode() { return isAdmin && adminDirty ? document.getElementById('voteMode').value : (currentData.voteMode || 'auto'); }
+    function renderModeRules() {
+        const mode = displayVoteMode();
+        document.getElementById('image-rule').hidden = mode === 'number';
+        document.getElementById('number-rule').hidden = mode === 'image';
+    }
     function previewingVoteMode() { return displayVoteMode() !== (currentData.voteMode || 'auto'); }
     function usesNumberVoting(item) {
         const mode = displayVoteMode();
@@ -649,6 +653,7 @@
 
     // --- 渲染前台视图 ---
     function renderUserView(items) {
+        renderModeRules();
         renderNumberVoting();
         const container = document.getElementById('voteContainer');
         container.innerHTML = '';
@@ -1260,7 +1265,7 @@
         });
     }
 
-    async function saveAll() {
+    async function saveAll(mergeNewRound = false) {
         if (saving || preparingSave) return;
         if (processingImages) return setSaveStatus('图片正在处理，请稍候再保存。', 'error');
         preparingSave = true;
@@ -1291,12 +1296,28 @@
         setSaveStatus('正在保存，等待服务器确认…');
         const noticeTimer = setTimeout(() => setSaveStatus('服务器尚未确认，请保留当前页面，连接恢复后会继续保存。'), 15000);
         try {
-            const baselineRound = JSON.parse(editorBaseline).round;
+            const baseline = JSON.parse(editorBaseline);
+            const baselineRound = baseline.round;
             const submittedSignature = metadataSignature({round:baselineRound,maxVotes,voteMode,items:drafts});
             const result = await db.ref('sparkVote').transaction(server => {
                 const latest = server || { items: [], round: 0, maxVotes: 1, headcount: 0 };
                 if (metadataSignature(latest) === submittedSignature) return latest;
-                if (metadataSignature(latest) !== editorBaseline) return;
+                if (metadataSignature(latest) !== editorBaseline) {
+                    const oldRows = drafts.filter(draft => draft.originalIndex != null);
+                    const additions = drafts.filter(draft => draft.originalIndex == null);
+                    const onlyAdds = additions.length > 0 && oldRows.length === baseline.items.length && oldRows.every((row, i) =>
+                        row.originalIndex === i && JSON.stringify({name:row.name,group:row.group,url:row.url}) === JSON.stringify(baseline.items[i]));
+                    if (!onlyAdds || ((latest.round || 0) !== baselineRound && !mergeNewRound)) return;
+                    const latestMode = latest.voteMode || 'auto', latestMax = latest.maxVotes || 1;
+                    if ((voteMode !== baseline.voteMode && latestMode !== baseline.voteMode && voteMode !== latestMode) ||
+                        (maxVotes !== baseline.maxVotes && latestMax !== baseline.maxVotes && maxVotes !== latestMax)) return;
+                    const mergedMode = voteMode === baseline.voteMode ? latestMode : voteMode;
+                    const mergedMax = maxVotes === baseline.maxVotes ? latestMax : maxVotes;
+                    if (additions.some(addition => (latest.items || []).some(item => item.name === addition.name && item.group === addition.group && item.url === addition.url))) return;
+                    const items = [...(latest.items || []), ...additions.map(({name,group,url}) => ({name,group,url,votes:0}))];
+                    if ((mergedMode !== 'image' && SparkNumbers.overlap(items)) || new TextEncoder().encode(JSON.stringify(items)).length > 15 * 1024 * 1024) return;
+                    return {...latest, items, maxVotes:mergedMax, voteMode:mergedMode === 'auto' ? null : mergedMode};
+                }
                 const items = drafts.map(draft => ({ ...(draft.originalIndex == null ? {} : latest.items?.[draft.originalIndex]), name: draft.name, group: draft.group, url: draft.url,
                     votes: draft.originalIndex == null ? 0 : (latest.items?.[draft.originalIndex]?.votes || 0) }));
                 return { ...latest, items, maxVotes, voteMode: voteMode === 'auto' ? null : voteMode };
@@ -1305,6 +1326,7 @@
             currentData = result.snapshot.val() || { items: [] };
             globalMaxVotes = currentData.maxVotes || 1;
             adminDirty = false;
+            document.getElementById('merge-draft-button').hidden = true;
             renderAdminView(currentData.items || []);
             document.querySelectorAll('#admin-panel input, #admin-panel button, #admin-panel select').forEach(control => { control.disabled = true; });
             renderUserView(currentData.items || []);
@@ -1312,8 +1334,9 @@
             refreshLocalSuggestions();
             await persistEditorDraft('saved');
             await writeLocalState('snapshot', currentData).catch(() => {});
-            setSaveStatus(`保存成功，服务器已确认 ${drafts.length} 个选项，刷新页面后仍会保留。`, 'success');
+            setSaveStatus(`保存成功，服务器已确认 ${(currentData.items || []).length} 个选项，刷新页面后仍会保留。`, 'success');
         } catch (error) {
+            if (/其他管理员/.test(error.message || '')) document.getElementById('merge-draft-button').hidden = false;
             setSaveStatus(`保存失败：${error.message || error.code}。编辑内容已保留，请勿关闭页面。`, 'error');
         } finally {
             clearTimeout(noticeTimer);

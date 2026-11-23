@@ -94,12 +94,40 @@ test('server rejection does not show success or discard dirty state', async () =
     assert.equal(vm.runInContext('adminDirty',app.context),true);
 });
 
-test('concurrent option edits abort without overwriting remote items', async () => {
+test('concurrent additions are merged without overwriting remote items', async () => {
     const app = setup([row({name:'图片'})]);
     app.server.data = {items:[{name:'另一管理员新建',url:'x',group:'组'}]};
     await app.context.saveAll();
+    assert.deepEqual(Array.from(app.server.data.items, item => item.name), ['另一管理员新建','图片']);
+});
+
+test('a new round cannot silently restore an old draft', async () => {
+    const app = setup([row({name:'图片'})]);
+    app.server.data = {items:[],round:1,maxVotes:1};
+    await app.context.saveAll();
     assert.equal(app.writes.length,0);
     assert.match(app.elements.get('save-status').textContent,/其他管理员/);
+    assert.equal(app.elements.get('merge-draft-button').hidden,false);
+    await app.context.saveAll(true);
+    assert.equal(app.server.data.round,1);
+    assert.equal(app.server.data.items[0].name,'图片');
+});
+
+test('simultaneous edits to the same setting still refuse to overwrite', async () => {
+    const app = setup([row({name:'图片'})]);
+    app.elements.get('maxVoteInput').value='3';
+    app.server.data = {items:[],round:0,maxVotes:2};
+    await app.context.saveAll(true);
+    assert.equal(app.writes.length,0);
+    assert.equal(app.server.data.maxVotes,2);
+});
+
+test('merge does not duplicate a previously committed image', async () => {
+    const app = setup([row({name:'图片'})]);
+    app.server.data = {items:[{name:'图片',url:'data:image/jpeg;base64,AA==',group:'测试组',votes:7}],round:0,maxVotes:2};
+    await app.context.saveAll(true);
+    assert.equal(app.writes.length,0);
+    assert.equal(app.server.data.items[0].votes,7);
 });
 
 test('offline save preserves the draft without issuing a write', async () => {
@@ -174,6 +202,19 @@ test('admin chooses a voting mode and existing ballots remain intact', async () 
     await app.context.saveAll();
     assert.equal(app.server.data.voteMode,'number');
     assert.equal(vm.runInContext('usesNumberVoting(currentData.items[0])',app.context),true);
+});
+
+test('admin mode selection immediately shows the corresponding rules', () => {
+    const app=setup();
+    vm.runInContext('isAdmin = true; adminDirty = true',app.context);
+    app.elements.get('voteMode').value='image';
+    app.context.renderModeRules();
+    assert.equal(app.elements.get('image-rule').hidden,false);
+    assert.equal(app.elements.get('number-rule').hidden,true);
+    app.elements.get('voteMode').value='number';
+    app.context.renderModeRules();
+    assert.equal(app.elements.get('image-rule').hidden,true);
+    assert.equal(app.elements.get('number-rule').hidden,false);
 });
 
 test('delete all starts a new round and removes every archived ballot', async () => {
